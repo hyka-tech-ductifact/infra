@@ -1,0 +1,53 @@
+services:
+  # ── PostgreSQL (staging) ───────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: ductifact_staging_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - staging_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - staging_internal
+
+  # ── Backend API (staging) ──────────────────────────────────
+  app:
+    image: ghcr.io/${GITHUB_REPO}:staging
+    container_name: ductifact_staging_app
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${APP_PORT}:${APP_PORT}"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME}
+      - APP_PORT=${APP_PORT}
+      - JWT_SECRET=${JWT_SECRET}
+      - CORS_ORIGINS=${CORS_ORIGINS}
+      - CONTRACT_VERSION=${CONTRACT_VERSION}
+      - LOG_LEVEL=${LOG_LEVEL}
+      - LOG_FORMAT=${LOG_FORMAT}
+      - GIN_MODE=${GIN_MODE}
+      - AUTO_MIGRATE=${AUTO_MIGRATE}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - staging_internal
+
+volumes:
+  staging_postgres_data:
+
+networks:
+  staging_internal:
+    driver: bridge
