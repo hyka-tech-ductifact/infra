@@ -1,3 +1,5 @@
+name: ductifact-staging
+
 services:
   # ── PostgreSQL (staging) ───────────────────────────────────
   postgres:
