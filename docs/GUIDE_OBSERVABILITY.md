@@ -510,8 +510,10 @@ Key variables used by the unified Compose:
 | `GRAFANA_PORT` | `3000` | `3001` |
 | `PROMETHEUS_RETENTION` | `30d` | `7d` |
 
-The Prometheus config file is selected dynamically:
-`prometheus.${ENV}.yml` → `prometheus.prod.yml` or `prometheus.staging.yml`.
+Inside Docker, the app always listens on port **8080** (fixed). `APP_PORT` only
+controls the host-side mapping (`${APP_PORT}:8080`). Prometheus lives on the
+same Docker network and always scrapes `app:8080` — a single `prometheus.yml`
+works for every environment with zero duplication.
 
 > **Seguridad**: en prod, Grafana escucha solo en `127.0.0.1` y se expone
 > al exterior via Caddy con HTTPS + autenticación.

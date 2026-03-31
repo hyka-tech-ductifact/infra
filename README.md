@@ -12,8 +12,7 @@ This repo is cloned on the server (`~/ductifact/infra/`) and contains everything
 ├── .env.staging.example         # Staging environment variables template
 ├── observability/               # Prometheus + Grafana configuration
 │   ├── prometheus/
-│   │   ├── prometheus.prod.yml
-│   │   ├── prometheus.staging.yml
+│   │   ├── prometheus.yml
 │   │   └── alerts.yml
 │   └── grafana/
 │       ├── provisioning/
