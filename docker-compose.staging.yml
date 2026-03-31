@@ -46,8 +46,45 @@ services:
     networks:
       - staging_internal
 
+  # ── Prometheus (staging) ───────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v3.3.0
+    container_name: ductifact_staging_prometheus
+    restart: unless-stopped
+    volumes:
+      - ./observability/prometheus/prometheus.staging.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - staging_prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=15d"
+    networks:
+      - staging_internal
+
+  # ── Grafana (staging) ──────────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.6.0
+    container_name: ductifact_staging_grafana
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - staging_grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - staging_internal
+
 volumes:
   staging_postgres_data:
+  staging_prometheus_data:
+  staging_grafana_data:
 
 networks:
   staging_internal:
