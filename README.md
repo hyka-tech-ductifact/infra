@@ -7,10 +7,17 @@ This repo is cloned on the server (`~/ductifact/infra/`) and contains everything
 ## Structure
 
 ```
-├── docker-compose.prod.yml      # Production: API + PostgreSQL (+ Prometheus/Grafana later)
-├── docker-compose.staging.yml   # Staging: API + PostgreSQL
+├── docker-compose.yml           # Unified compose for all environments
 ├── .env.prod.example            # Production environment variables template
 ├── .env.staging.example         # Staging environment variables template
+├── observability/               # Prometheus + Grafana configuration
+│   ├── prometheus/
+│   │   ├── prometheus.prod.yml
+│   │   ├── prometheus.staging.yml
+│   │   └── alerts.yml
+│   └── grafana/
+│       ├── provisioning/
+│       └── dashboards/
 └── scripts/
     └── deploy.sh                # Deploy script (called from CD workflow)
 ```
@@ -31,8 +38,8 @@ cp .env.staging.example .env.staging
 echo "YOUR_GITHUB_TOKEN" | docker login ghcr.io -u YOUR_USER --password-stdin
 
 # 4. Start the environments
-docker compose --env-file .env.staging -f docker-compose.staging.yml up -d
-docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
+docker compose --env-file .env.staging up -d
+docker compose --env-file .env.prod up -d
 ```
 
 ## Deploy

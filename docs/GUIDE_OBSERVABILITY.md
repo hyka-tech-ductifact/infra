@@ -124,8 +124,9 @@ infra/
           dashboard.yml       # Provider de dashboards
       dashboards/
         ductifact-api.json    # Dashboard pre-configurado
-  docker-compose.prod.yml     # (ya existente — se añaden servicios)
-  docker-compose.staging.yml  # (ya existente — se añaden servicios)
+  docker-compose.yml          # Unified compose (parameterized per env)
+  .env.prod                   # Production environment variables
+  .env.staging                # Staging environment variables
 ```
 
 Crear la estructura:
@@ -495,60 +496,27 @@ volumes:
 
 ## 5. Docker Compose (prod / staging)
 
-Añadir a `infra/docker-compose.prod.yml`:
+Both environments share a single `infra/docker-compose.yml`. The behavior is
+parameterized through environment variables loaded from `.env.prod` or
+`.env.staging`. This avoids duplicating the entire Compose file.
 
-```yaml
-services:
-  # ... (postgres y app existentes) ...
+Key variables used by the unified Compose:
 
-  # ── Prometheus ─────────────────────────────────────────────
-  prometheus:
-    image: prom/prometheus:v3.3.0
-    container_name: ductifact_prod_prometheus
-    restart: unless-stopped
-    volumes:
-      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
-      - prod_prometheus_data:/prometheus
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.retention.time=30d"
-    networks:
-      - prod_internal
+| Variable | Prod example | Staging example |
+|---|---|---|
+| `ENV` | `prod` | `staging` |
+| `IMAGE_TAG` | `latest` | `latest` |
+| `APP_PORT` | `8090` | `8091` |
+| `GRAFANA_PORT` | `3000` | `3001` |
+| `PROMETHEUS_RETENTION` | `30d` | `7d` |
 
-  # ── Grafana ────────────────────────────────────────────────
-  grafana:
-    image: grafana/grafana:11.6.0
-    container_name: ductifact_prod_grafana
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:3000:3000"       # Solo accesible via Caddy/tunnel
-    environment:
-      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
-      - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_SERVER_ROOT_URL=https://grafana.tudominio.com
-    volumes:
-      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
-      - prod_grafana_data:/var/lib/grafana
-    depends_on:
-      - prometheus
-    networks:
-      - prod_internal
-
-volumes:
-  # ... (prod_postgres_data existente) ...
-  prod_prometheus_data:
-  prod_grafana_data:
-```
-
-> Mismo patrón para `docker-compose.staging.yml` cambiando prefijos a `staging_`.
+The Prometheus config file is selected dynamically:
+`prometheus.${ENV}.yml` → `prometheus.prod.yml` or `prometheus.staging.yml`.
 
 > **Seguridad**: en prod, Grafana escucha solo en `127.0.0.1` y se expone
 > al exterior via Caddy con HTTPS + autenticación.
 
-> **¿Por qué `127.0.0.1:3000:3000` y no `3000:3000`?**
+> **¿Por qué `127.0.0.1:${GRAFANA_PORT}:3000` y no `${GRAFANA_PORT}:3000`?**
 > Sin el bind a `127.0.0.1`, Docker expone el puerto en todas las interfaces
 > de red (0.0.0.0), haciéndolo accesible desde internet directamente,
 > saltándose el firewall del host. Con `127.0.0.1` solo es accesible
@@ -566,10 +534,14 @@ docker compose --profile monitoring up -d
 docker compose --profile smoke --profile monitoring up -d
 ```
 
-### Prod (desde `infra/`)
+### Prod / Staging (desde `infra/`)
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d
+# Production
+docker compose --env-file .env.prod up -d
+
+# Staging
+docker compose --env-file .env.staging up -d
 ```
 
 ### Verificar
@@ -722,8 +694,8 @@ open http://localhost:3000            # Grafana (admin/admin)
 ```
 
 > **Siguiente paso**: una vez validado en dev, desplegar con
-> `docker compose -f docker-compose.prod.yml up -d` desde `infra/`
-> con credenciales seguras vía `.env`.
+> `docker compose --env-file .env.prod up -d` desde `infra/`
+> con credenciales seguras vía `.env.prod`.
 
 ---
 

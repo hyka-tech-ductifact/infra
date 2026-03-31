@@ -22,21 +22,15 @@ if [[ -z "$ENV" || -z "$IMAGE" ]]; then
 fi
 
 case "$ENV" in
-  staging)
-    COMPOSE_FILE="docker-compose.staging.yml"
-    ENV_FILE=".env.staging"
-    CONTAINER="ductifact_staging_app"
-    ;;
-  prod)
-    COMPOSE_FILE="docker-compose.prod.yml"
-    ENV_FILE=".env.prod"
-    CONTAINER="ductifact_prod_app"
-    ;;
+  staging|prod) ;;
   *)
     echo "ERROR: unknown environment '$ENV'. Use 'staging' or 'prod'."
     exit 1
     ;;
 esac
+
+ENV_FILE=".env.${ENV}"
+CONTAINER="ductifact_${ENV}_app"
 
 # ── Navigate to infra directory ──────────────────────────────
 INFRA_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -44,7 +38,7 @@ cd "$INFRA_DIR"
 
 echo "=== Deploying $ENV ==="
 echo "Image:     $IMAGE"
-echo "Compose:   $COMPOSE_FILE"
+echo "Env file:  $ENV_FILE"
 echo "Directory: $INFRA_DIR"
 
 # ── Pull latest infra config ────────────────────────────────
@@ -57,7 +51,7 @@ docker pull "$IMAGE"
 
 # ── Restart containers ───────────────────────────────────────
 echo "Restarting containers..."
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d app
+docker compose --env-file "$ENV_FILE" up -d
 
 # ── Verify container is running ──────────────────────────────
 echo "Waiting for container to start..."

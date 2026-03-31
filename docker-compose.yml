@@ -1,29 +1,29 @@
-name: ductifact-prod
+name: ductifact-${ENV}
 
 services:
   # ── PostgreSQL ─────────────────────────────────────────────
   postgres:
     image: postgres:15-alpine
-    container_name: ductifact_prod_postgres
+    container_name: ductifact_${ENV}_postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME}
     volumes:
-      - prod_postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U ${DB_USER}" ]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
-      - prod_internal
+      - internal
 
   # ── Backend API ────────────────────────────────────────────
   app:
-    image: ghcr.io/${GITHUB_REPO}:latest
-    container_name: ductifact_prod_app
+    image: ghcr.io/${GITHUB_REPO}:${IMAGE_TAG}
+    container_name: ductifact_${ENV}_app
     restart: unless-stopped
     ports:
       - "127.0.0.1:${APP_PORT}:${APP_PORT}"
@@ -44,30 +44,30 @@ services:
       postgres:
         condition: service_healthy
     networks:
-      - prod_internal
+      - internal
 
   # ── Prometheus ─────────────────────────────────────────────
   prometheus:
     image: prom/prometheus:v3.3.0
-    container_name: ductifact_prod_prometheus
+    container_name: ductifact_${ENV}_prometheus
     restart: unless-stopped
     volumes:
-      - ./observability/prometheus/prometheus.prod.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus/prometheus.${ENV}.yml:/etc/prometheus/prometheus.yml:ro
       - ./observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
-      - prod_prometheus_data:/prometheus
+      - prometheus_data:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.retention.time=30d"
+      - "--storage.tsdb.retention.time=${PROMETHEUS_RETENTION}"
     networks:
-      - prod_internal
+      - internal
 
   # ── Grafana ────────────────────────────────────────────────
   grafana:
     image: grafana/grafana:11.6.0
-    container_name: ductifact_prod_grafana
+    container_name: ductifact_${ENV}_grafana
     restart: unless-stopped
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${GRAFANA_PORT}:3000"
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
@@ -75,18 +75,17 @@ services:
     volumes:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
-      - prod_grafana_data:/var/lib/grafana
+      - grafana_data:/var/lib/grafana
     depends_on:
       - prometheus
     networks:
-      - prod_internal
+      - internal
 
 volumes:
-  prod_postgres_data:
-  prod_prometheus_data:
-  prod_grafana_data:
-
+  postgres_data:
+  prometheus_data:
+  grafana_data:
 
 networks:
-  prod_internal:
+  internal:
     driver: bridge
