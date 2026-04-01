@@ -7,7 +7,8 @@ This repo is cloned on the server (`~/ductifact/infra/`) and contains everything
 ## Structure
 
 ```
-├── docker-compose.yml           # Unified compose for all environments
+├── .github/workflows/ci.yml     # CI: validates compose + prometheus configs
+├── docker-compose.yml           # Production/staging compose (single source of truth)
 ├── .env.prod.example            # Production environment variables template
 ├── .env.staging.example         # Staging environment variables template
 ├── observability/               # Prometheus + Grafana configuration

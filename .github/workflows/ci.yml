@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Dummy values — only needed so `docker compose config` can interpolate variables.
+# No containers are actually started.
+env:
+  ENV: ci
+  IMAGE_TAG: latest
+  DB_USER: x
+  DB_PASSWORD: x
+  DB_NAME: x
+  APP_PORT: "8080"
+  JWT_SECRET: ci-placeholder-secret-at-least-32-characters
+  CORS_ORIGINS: "*"
+  LOG_LEVEL: error
+  LOG_FORMAT: text
+  GIN_MODE: release
+  AUTO_MIGRATE: "false"
+  GITHUB_REPO: test/test
+  GRAFANA_PORT: "3000"
+  GRAFANA_PASSWORD: x
+  PROMETHEUS_RETENTION: 1d
+
+jobs:
+  validate:
+    name: Validate configs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate docker-compose.yml
+        run: docker compose config --quiet
+
+      - name: Validate Prometheus config
+        run: >
+          docker run --rm
+          -v ${{ github.workspace }}/observability/prometheus:/etc/prometheus
+          prom/prometheus:v3.3.0
+          promtool check config /etc/prometheus/prometheus.yml
+
+      - name: Validate Prometheus alert rules
+        run: >
+          docker run --rm
+          -v ${{ github.workspace }}/observability/prometheus:/etc/prometheus
+          prom/prometheus:v3.3.0
+          promtool check rules /etc/prometheus/alerts.yml
+
+      - name: Validate Grafana dashboard JSON
+        run: |
+          for f in observability/grafana/dashboards/*.json; do
+            echo "Checking $f..."
+            python3 -m json.tool "$f" > /dev/null
+          done
+
+      - name: Validate Grafana provisioning YAML
+        run: |
+          for f in $(find observability/grafana/provisioning -name '*.yml' -o -name '*.yaml'); do
+            echo "Checking $f..."
+            python3 -c "import yaml, sys; yaml.safe_load(open(sys.argv[1]))" "$f"
+          done
+
+      - name: Lint deploy script
+        run: |
+          sudo apt-get -qq install -y shellcheck > /dev/null
+          shellcheck scripts/deploy.sh

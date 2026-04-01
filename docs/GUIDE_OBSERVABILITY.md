@@ -124,7 +124,7 @@ infra/
           dashboard.yml       # Provider de dashboards
       dashboards/
         ductifact-api.json    # Dashboard pre-configurado
-  docker-compose.yml          # Unified compose (parameterized per env)
+  docker-compose.yml          # Production/staging compose
   .env.prod                   # Production environment variables
   .env.staging                # Staging environment variables
 ```
@@ -438,67 +438,27 @@ Crear `infra/observability/grafana/dashboards/ductifact-api.json`:
 
 ## 4. Docker Compose (dev)
 
-Para desarrollo local, añadir a `backend/docker-compose.yml` los servicios
-de monitoring.
+For local development, `backend/docker-compose.yml` only contains the
+app's **dependencies** (postgres, and in the future minio, redis, etc.).
+It does NOT include the app itself — you run the app on the host with
+`make dev` (air hot-reload) or `make app-start`.
 
-Usamos **Docker Compose profiles** (`profiles: [ monitoring ]`) para que
-Prometheus y Grafana **no arranquen por defecto** con `docker compose up`.
-Solo se levantan cuando explícitamente lo pides con `--profile monitoring`.
-Así no consumen recursos si solo estás desarrollando features.
+The Docker smoke test (`make docker-smoke`) builds and runs the image
+standalone with `docker build` + `docker run` — no compose needed.
 
-```yaml
-services:
-  # ... (postgres y app existentes) ...
+The production compose lives in `infra/docker-compose.yml` and is
+independent of the backend repo.
 
-  prometheus:
-    image: prom/prometheus:v3.3.0
-    container_name: ductifact_dev_prometheus
-    restart: unless-stopped
-    profiles: [ monitoring ]
-    ports:
-      - "9090:9090"
-    volumes:
-      - ../infra/observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ../infra/observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
-      - prometheus_data:/prometheus
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.retention.time=15d"
-
-  grafana:
-    image: grafana/grafana:11.6.0
-    container_name: ductifact_dev_grafana
-    restart: unless-stopped
-    profiles: [ monitoring ]
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_USERS_ALLOW_SIGN_UP=false
-    volumes:
-      - ../infra/observability/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ../infra/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
-      - grafana_data:/var/lib/grafana
-    depends_on:
-      - prometheus
-
-volumes:
-  # ... (postgres_data existente) ...
-  prometheus_data:
-  grafana_data:
-```
-
-> Los volúmenes montan desde `../infra/observability/` — los ficheros de
-> configuración viven en `infra/`, compartidos entre dev y prod.
-> El sufijo `:ro` (read-only) es una buena práctica de seguridad: el contenedor
-> puede leer la config pero no modificarla.
+> The config files in `observability/` are shared between dev and prod.
+> The `:ro` (read-only) suffix is a security best practice: the container
+> can read the config but cannot modify it.
 
 ## 5. Docker Compose (prod / staging)
 
-Both environments share a single `infra/docker-compose.yml`. The behavior is
-parameterized through environment variables loaded from `.env.prod` or
-`.env.staging`. This avoids duplicating the entire Compose file.
+`infra/docker-compose.yml` is the single source of truth for deployment.
+The behavior is parameterized through environment variables loaded
+from `.env.prod` or `.env.staging`. The backend repo does not depend on
+this file — it has its own compose for dev dependencies only.
 
 Key variables used by the unified Compose:
 
@@ -529,11 +489,8 @@ works for every environment with zero duplication.
 ### Dev (desde `backend/`)
 
 ```bash
-# Arrancar solo monitoring (requiere app + postgres ya corriendo)
-docker compose --profile monitoring up -d
-
-# O todo junto
-docker compose --profile smoke --profile monitoring up -d
+make dev             # starts postgres + app with hot-reload
+make docker-smoke    # builds image, runs container, verifies it starts
 ```
 
 ### Prod / Staging (desde `infra/`)
