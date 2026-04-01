@@ -2,9 +2,9 @@
 
 ## Workflow overview
 
-Changes to infrastructure are deployed **manually** after merge — staging first, then production.
+This repo **has no versions and no CD pipeline**. Each change is deployed manually after merge — staging first, then production.
 
-There is no CD pipeline for this repo. This is intentional: infra changes (image upgrades, config tweaks) are infrequent and high-impact, so a human should always be watching.
+This is intentional: infra changes (image upgrades, config tweaks) are infrequent and high-impact, so a human should always be in control.
 
 ---
 
@@ -16,7 +16,7 @@ There is no CD pipeline for this repo. This is intentional: infra changes (image
 | `fix/` | Fix broken config, wrong ports | `fix/prometheus-scrape-interval` |
 | `chore/` | Version bumps, CI, docs, cleanup | `chore/upgrade-grafana-12` |
 
-All PRs target `main`. There is no `release` branch — production is updated manually.
+All PRs target `main`. There are no releases, tags, or versions — `main` is always the source of truth and production is updated manually.
 
 ---
 
@@ -30,7 +30,9 @@ git checkout -b chore/upgrade-prometheus
 git push -u origin chore/upgrade-prometheus
 ```
 
-Open a PR into `main`. CI validates compose syntax, Prometheus config, Grafana dashboards, and deploy script.
+Open a PR into `main`. Use **squash merge** (1 PR = 1 commit).
+
+CI validates compose syntax, Prometheus config, Grafana dashboards, and deploy script.
 
 ---
 
@@ -66,4 +68,5 @@ docker compose --env-file .env.prod up -d
 
 - No direct pushes to `main`
 - CI must pass (compose validation, prometheus config, shellcheck)
+- Keep PRs small and focused
 - Test in staging before applying to production

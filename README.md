@@ -4,7 +4,7 @@ Infrastructure configuration for the **production** and **staging** environments
 
 This repo is cloned on the server (`~/ductifact/infra/`) and contains everything needed to orchestrate services with Docker Compose.
 
-## Structure
+## Project Structure
 
 ```
 ├── .github/workflows/ci.yml     # CI: validates compose + prometheus configs
@@ -42,19 +42,6 @@ docker compose --env-file .env.staging up -d
 docker compose --env-file .env.prod up -d
 ```
 
-## Deploy
-
-Deploys are triggered automatically by GitHub Actions (CD) via SSH:
-
-```bash
-# Staging — automatic after merge to main
-# Production — automatic after pushing a v* tag
-
-# Can also be run manually:
-./scripts/deploy.sh staging ghcr.io/your-user/ductifact:staging
-./scripts/deploy.sh prod    ghcr.io/your-user/ductifact:latest
-```
-
 ## Notes
 
 - `.env.prod` and `.env.staging` are **never committed** (listed in `.gitignore`).
@@ -62,4 +49,7 @@ Deploys are triggered automatically by GitHub Actions (CD) via SSH:
 - Ports are only exposed on `127.0.0.1` — Caddy (host-level) handles reverse proxying.
 - Full CD guide available at `backend/docs/GUIDE_CD.md`.
 - Server maintenance (logs, backups, rollbacks, security) documented in [`MAINTENANCE.md`](MAINTENANCE.md).
-- Contributing workflow and branch naming in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for branch naming, workflow, deploy process, and PR guidelines.
