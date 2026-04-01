@@ -62,3 +62,4 @@ Deploys are triggered automatically by GitHub Actions (CD) via SSH:
 - Ports are only exposed on `127.0.0.1` — Caddy (host-level) handles reverse proxying.
 - Full CD guide available at `backend/docs/GUIDE_CD.md`.
 - Server maintenance (logs, backups, rollbacks, security) documented in [`MAINTENANCE.md`](MAINTENANCE.md).
+- Contributing workflow and branch naming in [`CONTRIBUTING.md`](CONTRIBUTING.md).
