@@ -43,15 +43,22 @@ CI validates compose syntax, Prometheus config, Grafana dashboards, and deploy s
 ssh deploy@your-server
 
 cd ~/ductifact/infra
-git pull
 
 # Always staging first
-docker compose --env-file .env.staging up -d
+./scripts/deploy.sh staging
 # Verify: check logs, health endpoints, Grafana
 
 # Then production
-docker compose --env-file .env.prod up -d
+./scripts/deploy.sh prod
 # Verify again
+```
+
+The script reads `APP_IMAGE` from `.env.<environment>`, pulls the image, restarts containers, and verifies the app is running.
+
+For **local testing** (no git pull, no docker pull):
+
+```bash
+./scripts/deploy.sh local
 ```
 
 ---
