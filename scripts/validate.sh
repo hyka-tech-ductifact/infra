@@ -112,7 +112,7 @@ while IFS= read -r -d '' f; do
   else
     fail "$(basename "$f") is invalid YAML"
   fi
-done < <(find observability/grafana/provisioning -name '*.yml' -o -name '*.yaml' -print0 2>/dev/null)
+done < <(find observability/grafana/provisioning \( -name '*.yml' -o -name '*.yaml' \) -print0 2>/dev/null)
 
 # ── 6. ShellCheck ────────────────────────────────────────────
 echo ""
