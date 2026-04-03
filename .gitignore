@@ -1,3 +1,4 @@
 # Archivos de entorno con credenciales reales (NUNCA commitear)
 .env.prod
 .env.staging
+.env.local

@@ -20,10 +20,10 @@ sudo journalctl -u caddy -f
 sudo journalctl -u cloudflared -f
 
 # All production services
-docker compose -f docker-compose.prod.yml logs -f
+docker compose --env-file .env.prod logs -f
 
 # All staging services
-docker compose -f docker-compose.staging.yml logs -f
+docker compose --env-file .env.staging logs -f
 ```
 
 ---
@@ -76,11 +76,10 @@ cd ~/ductifact/infra
 docker images ghcr.io/your-user/ductifact
 
 # Stop the current version
-docker compose --env-file .env.prod -f docker-compose.prod.yml stop app
+docker compose --env-file .env.prod stop app
 
-# Temporarily change the image in docker-compose.prod.yml
-# image: ghcr.io/your-user/ductifact:v0.3.0
-docker compose --env-file .env.prod -f docker-compose.prod.yml up -d app
+# Edit .env.prod temporarily: IMAGE_TAG=v0.3.0
+docker compose --env-file .env.prod up -d app
 ```
 
 ### Option 2: Hotfix via the `release` branch (minutes, the correct way)
@@ -142,13 +141,13 @@ When staging accumulates test data and you want a clean slate:
 cd ~/ductifact/infra
 
 # Stop staging completely
-docker compose --env-file .env.staging -f docker-compose.staging.yml down
+docker compose --env-file .env.staging down
 
 # Remove the data volume (staging only!)
 docker volume rm ductifact_staging_postgres_data
 
 # Bring it back up (GORM AutoMigrate recreates tables on app startup)
-docker compose --env-file .env.staging -f docker-compose.staging.yml up -d
+docker compose --env-file .env.staging up -d
 ```
 
 ---
