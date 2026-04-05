@@ -57,7 +57,6 @@ export AUTO_MIGRATE="${AUTO_MIGRATE:-false}"
 export PROMETHEUS_PORT="${PROMETHEUS_PORT:-9090}"
 export PROMETHEUS_RETENTION="${PROMETHEUS_RETENTION:-1d}"
 export GRAFANA_PORT="${GRAFANA_PORT:-3000}"
-export GRAFANA_PASSWORD="${GRAFANA_PASSWORD:-x}"
 
 # ── 1. docker-compose.yml ───────────────────────────────────
 echo "Docker Compose:"
