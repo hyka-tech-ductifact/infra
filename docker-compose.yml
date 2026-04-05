@@ -39,7 +39,6 @@ services:
       - LOG_LEVEL=${LOG_LEVEL}
       - LOG_FORMAT=${LOG_FORMAT}
       - GIN_MODE=${GIN_MODE}
-      - AUTO_MIGRATE=${AUTO_MIGRATE}
     depends_on:
       postgres:
         condition: service_healthy
