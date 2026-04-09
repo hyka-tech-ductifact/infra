@@ -2,17 +2,19 @@
 # deploy.sh — Deploy or stop a ductifact environment.
 #
 # Usage:
-#   ./scripts/deploy.sh <environment>          # deploy (start/update)
+#   ./scripts/deploy.sh <environment>          # deploy + smoke tests
 #   ./scripts/deploy.sh <environment> stop     # stop all containers
 #
 #   environment: local | staging | prod
 #
 # The image and all config come from .env.<environment>.
+# After a successful deploy, smoke tests run automatically to verify
+# all services are healthy.
 #
 # Examples:
-#   ./scripts/deploy.sh local            # start with local image
+#   ./scripts/deploy.sh local            # start with local image + smoke
 #   ./scripts/deploy.sh local stop       # stop local environment
-#   ./scripts/deploy.sh staging          # pull + start staging
+#   ./scripts/deploy.sh staging          # pull + start staging + smoke
 #   ./scripts/deploy.sh prod stop        # stop production
 
 set -euo pipefail
@@ -46,6 +48,7 @@ esac
 ENV_FILE=".env.${ENV}"
 
 # ── Navigate to infra directory ──────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INFRA_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$INFRA_DIR"
 
@@ -77,6 +80,14 @@ echo "Image:     $APP_IMAGE"
 echo "Env file:  $ENV_FILE"
 echo "Directory: $INFRA_DIR"
 
+# ── Pre-deploy validation ────────────────────────────────────
+echo "Running pre-deploy validation..."
+if ! "${SCRIPT_DIR}/validate.sh" "$ENV"; then
+  echo "ERROR: Pre-deploy validation failed. Fix the issues above before deploying."
+  exit 1
+fi
+echo ""
+
 # ── Pull latest infra config (skip for local) ────────────────
 if [[ "$ENV" != "local" ]]; then
   echo "Pulling latest infra config..."
@@ -106,4 +117,13 @@ fi
 # ── Cleanup ──────────────────────────────────────────────────
 docker image prune -f
 
-echo "=== $ENV deploy successful! ==="
+# ── Post-deploy smoke tests ──────────────────────────────────
+echo "Running post-deploy smoke tests..."
+if "${SCRIPT_DIR}/smoke.sh" "$ENV"; then
+  echo "=== $ENV deploy successful! ==="
+else
+  echo "ERROR: Deploy completed but smoke tests failed!"
+  echo "Services may not be healthy. Check logs with:"
+  echo "  docker logs ductifact_${ENV}_app --tail=50"
+  exit 1
+fi
