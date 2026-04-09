@@ -10,13 +10,17 @@
 #   4. Grafana dashboard JSON
 #   5. Grafana provisioning YAML
 #   6. ShellCheck on all scripts
+#   7. Environment variables completeness (when <environment> is given)
 #
 # Usage:
-#   ./scripts/validate.sh
+#   ./scripts/validate.sh                    # validate configs only
+#   ./scripts/validate.sh <environment>      # also check env vars
+#
+#   environment: local | staging | prod
 #
 # Examples:
-#   cd infra && ./scripts/validate.sh
-#   ./scripts/validate.sh               # from infra/scripts/
+#   ./scripts/validate.sh                    # CI / general check
+#   ./scripts/validate.sh staging            # pre-deploy check
 
 set -euo pipefail
 
@@ -31,6 +35,19 @@ fail() { echo -e "  ${RED}✘${NC} $1"; FAILURES=$((FAILURES + 1)); }
 info() { echo -e "  ${YELLOW}…${NC} $1"; }
 
 FAILURES=0
+
+# ── Optional environment argument ────────────────────────────
+TARGET_ENV="${1:-}"
+
+if [[ -n "$TARGET_ENV" ]]; then
+  case "$TARGET_ENV" in
+    local|staging|prod) ;;
+    *)
+      echo "ERROR: unknown environment '$TARGET_ENV'. Use 'local', 'staging', or 'prod'."
+      exit 1
+      ;;
+  esac
+fi
 
 # ── Resolve infra root ──────────────────────────────────────
 INFRA_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -127,6 +144,49 @@ if command -v shellcheck > /dev/null 2>&1; then
   done
 else
   info "shellcheck not installed — skipping (apt install shellcheck)"
+fi
+
+# ── 7. Environment variables completeness ───────────────────
+if [[ -n "$TARGET_ENV" ]]; then
+  echo ""
+  echo "Environment variables ($TARGET_ENV):"
+
+  EXAMPLE_FILE=".env.${TARGET_ENV}.example"
+  ACTUAL_FILE=".env.${TARGET_ENV}"
+
+  if [[ ! -f "$EXAMPLE_FILE" ]]; then
+    fail "$EXAMPLE_FILE not found"
+  elif [[ ! -f "$ACTUAL_FILE" ]]; then
+    fail "$ACTUAL_FILE not found — copy from $EXAMPLE_FILE and fill in values"
+  else
+    MISSING_VARS=()
+    EMPTY_VARS=()
+
+    # Extract variable names from example (lines matching KEY=VALUE, skip comments/blanks)
+    while IFS='=' read -r key _; do
+      # Look up value in actual env file
+      ACTUAL_LINE=$(grep -E "^${key}=" "$ACTUAL_FILE" 2>/dev/null || true)
+      if [[ -z "$ACTUAL_LINE" ]]; then
+        MISSING_VARS+=("$key")
+      else
+        VALUE="${ACTUAL_LINE#*=}"
+        if [[ -z "$VALUE" ]]; then
+          EMPTY_VARS+=("$key")
+        fi
+      fi
+    done < <(grep -E '^[A-Z_]+=.' "$EXAMPLE_FILE")
+
+    if [[ ${#MISSING_VARS[@]} -eq 0 && ${#EMPTY_VARS[@]} -eq 0 ]]; then
+      pass "All variables from $EXAMPLE_FILE are defined in $ACTUAL_FILE"
+    else
+      if [[ ${#MISSING_VARS[@]} -gt 0 ]]; then
+        fail "Missing variables in $ACTUAL_FILE: ${MISSING_VARS[*]}"
+      fi
+      if [[ ${#EMPTY_VARS[@]} -gt 0 ]]; then
+        fail "Empty variables in $ACTUAL_FILE: ${EMPTY_VARS[*]}"
+      fi
+    fi
+  fi
 fi
 
 # ── Summary ──────────────────────────────────────────────────
