@@ -58,22 +58,14 @@ echo "=== Validate infra configs ==="
 echo ""
 
 # ── Dummy env vars for docker compose config ────────────────
-# Only needed so variable interpolation works; no containers are started.
-export ENV="${ENV:-validate}"
-export APP_IMAGE="${APP_IMAGE:-placeholder}"
-export APP_PORT="${APP_PORT:-8080}"
-export DB_USER="${DB_USER:-x}"
-export DB_PASSWORD="${DB_PASSWORD:-x}"
-export DB_NAME="${DB_NAME:-x}"
-export JWT_SECRET="${JWT_SECRET:-validate-placeholder-secret-32chars}"
-export CORS_ORIGINS="${CORS_ORIGINS:-*}"
-export LOG_LEVEL="${LOG_LEVEL:-error}"
-export LOG_FORMAT="${LOG_FORMAT:-text}"
-export GIN_MODE="${GIN_MODE:-release}"
-export AUTO_MIGRATE="${AUTO_MIGRATE:-false}"
-export PROMETHEUS_PORT="${PROMETHEUS_PORT:-9090}"
-export PROMETHEUS_RETENTION="${PROMETHEUS_RETENTION:-1d}"
-export GRAFANA_PORT="${GRAFANA_PORT:-3000}"
+# Dynamically extract all ${VAR} references from docker-compose.yml
+# and set any undefined ones to a placeholder value.
+# This way we never need to maintain a manual list.
+while IFS= read -r var; do
+  if [[ -z "${!var:-}" ]]; then
+    export "$var=placeholder"
+  fi
+done < <(grep -oP '\$\{(\w+)' docker-compose.yml | sed 's/\${//' | sort -u)
 
 # ── 1. docker-compose.yml ───────────────────────────────────
 echo "Docker Compose:"
@@ -134,7 +126,9 @@ done < <(find observability/grafana/provisioning \( -name '*.yml' -o -name '*.ya
 echo ""
 echo "ShellCheck:"
 
-if command -v shellcheck > /dev/null 2>&1; then
+if ! command -v shellcheck > /dev/null 2>&1; then
+  fail "shellcheck is not installed (apt install shellcheck)"
+else
   for f in scripts/*.sh; do
     if shellcheck "$f" > /dev/null 2>&1; then
       pass "$(basename "$f") passes shellcheck"
@@ -142,8 +136,6 @@ if command -v shellcheck > /dev/null 2>&1; then
       fail "$(basename "$f") has shellcheck warnings"
     fi
   done
-else
-  info "shellcheck not installed — skipping (apt install shellcheck)"
 fi
 
 # ── 7. Environment variables completeness ───────────────────
