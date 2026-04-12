@@ -51,7 +51,7 @@ BACKUP_DIR="/var/backups/ductifact/${ENV}"
 
 if [[ -z "$BACKUP_FILE" ]]; then
   # Find the latest backup
-  BACKUP_FILE="$(ls -t "$BACKUP_DIR"/*.sql.gz 2>/dev/null | head -1)"
+  BACKUP_FILE="$(find "$BACKUP_DIR" -maxdepth 1 -name '*.sql.gz' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)"
   if [[ -z "$BACKUP_FILE" ]]; then
     echo "ERROR: no backups found in $BACKUP_DIR"
     exit 1

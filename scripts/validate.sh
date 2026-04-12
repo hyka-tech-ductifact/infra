@@ -63,7 +63,7 @@ echo ""
 # This way we never need to maintain a manual list.
 while IFS= read -r var; do
   if [[ -z "${!var:-}" ]]; then
-    export "$var=placeholder"
+    export "$var=8080"
   fi
 done < <(grep -oP '\$\{(\w+)' docker-compose.yml | sed 's/\${//' | sort -u)
 
@@ -105,22 +105,43 @@ fi
 echo ""
 echo "Grafana:"
 
-for f in observability/grafana/dashboards/*.json; do
-  if python3 -m json.tool "$f" > /dev/null 2>&1; then
-    pass "$(basename "$f") is valid JSON"
+DASHBOARD_DIR="observability/grafana/dashboards"
+if [[ -d "$DASHBOARD_DIR" ]]; then
+  shopt -s nullglob
+  json_files=("$DASHBOARD_DIR"/*.json)
+  shopt -u nullglob
+
+  if [[ ${#json_files[@]} -eq 0 ]]; then
+    info "No dashboard JSON files found in $DASHBOARD_DIR"
   else
-    fail "$(basename "$f") is invalid JSON"
+    for f in "${json_files[@]}"; do
+      if python3 -m json.tool "$f" > /dev/null 2>&1; then
+        pass "$(basename "$f") is valid JSON"
+      else
+        fail "$(basename "$f") is invalid JSON"
+      fi
+    done
   fi
-done
+else
+  fail "Dashboard directory not found: $DASHBOARD_DIR"
+fi
 
 # ── 5. Grafana provisioning (YAML) ──────────────────────────
-while IFS= read -r -d '' f; do
-  if python3 -c "import yaml, sys; yaml.safe_load(open(sys.argv[1]))" "$f" 2>/dev/null; then
-    pass "$(basename "$f") is valid YAML"
-  else
-    fail "$(basename "$f") is invalid YAML"
-  fi
-done < <(find observability/grafana/provisioning \( -name '*.yml' -o -name '*.yaml' \) -print0 2>/dev/null)
+if ! python3 -c "import yaml" 2>/dev/null; then
+  info "pyyaml not installed — skipping YAML validation (pip install pyyaml)"
+else
+  while IFS= read -r -d '' f; do
+    if python3 -c "
+import yaml, sys
+with open(sys.argv[1]) as fh:
+    yaml.safe_load(fh)
+" "$f" 2>/dev/null; then
+      pass "$(basename "$f") is valid YAML"
+    else
+      fail "$(basename "$f") is invalid YAML"
+    fi
+  done < <(find observability/grafana/provisioning \( -name '*.yml' -o -name '*.yaml' \) -print0 2>/dev/null)
+fi
 
 # ── 6. ShellCheck ────────────────────────────────────────────
 echo ""
