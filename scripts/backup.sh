@@ -51,12 +51,17 @@ source "$ENV_FILE"
 
 # ── Configuration ────────────────────────────────────────────
 CONTAINER="ductifact_${ENV}_postgres"
-BACKUP_DIR="/var/backups/ductifact/${ENV}"
+BACKUP_DIR="${BACKUP_DIR:-${HOME}/backups/ductifact}/${ENV}"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 BACKUP_FILE="${BACKUP_DIR}/${TIMESTAMP}.sql.gz"
 
-# ── Create backup directory ──────────────────────────────────
-mkdir -p "$BACKUP_DIR"
+# ── Create backup directory ────────────────────────────────────────
+if ! mkdir -p "$BACKUP_DIR" 2>/dev/null; then
+  echo "ERROR: cannot create backup directory '$BACKUP_DIR'."
+  echo "  Fix permissions:  sudo mkdir -p \"$(dirname "$BACKUP_DIR")\" && sudo chown \"$(whoami)\" \"$(dirname "$BACKUP_DIR")\""
+  echo "  Or set BACKUP_DIR in $ENV_FILE to a writable path."
+  exit 1
+fi
 
 # ── Verify container is running ──────────────────────────────
 if ! docker inspect --format='{{.State.Running}}' "$CONTAINER" 2>/dev/null | grep -q true; then

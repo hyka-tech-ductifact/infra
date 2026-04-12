@@ -47,7 +47,7 @@ fi
 source "$ENV_FILE"
 
 # ── Resolve backup file ─────────────────────────────────────
-BACKUP_DIR="/var/backups/ductifact/${ENV}"
+BACKUP_DIR="${BACKUP_DIR:-${HOME}/backups/ductifact}/${ENV}"
 
 if [[ -z "$BACKUP_FILE" ]]; then
   # Find the latest backup
