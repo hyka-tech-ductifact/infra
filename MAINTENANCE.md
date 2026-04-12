@@ -30,33 +30,50 @@ docker compose --env-file .env.staging logs -f
 
 ## 2. Database Backups
 
-### Manual backup
+### Automated backups (recommended)
+
+Use the backup/restore scripts in `scripts/`:
 
 ```bash
-# Production
-docker exec ductifact_prod_postgres \
-  pg_dump -U ductifact_user ductifact_db > ~/backups/prod_$(date +%Y%m%d).sql
+# Create a backup (saves to /var/backups/ductifact/<env>/)
+./scripts/backup.sh prod
 
-# Staging
-docker exec ductifact_staging_postgres \
-  pg_dump -U ductifact_staging_user ductifact_staging_db > ~/backups/staging_$(date +%Y%m%d).sql
+# Restore the latest backup
+./scripts/restore.sh prod
 
-# Restore
-cat ~/backups/prod_20260320.sql | docker exec -i ductifact_prod_postgres \
-  psql -U ductifact_user ductifact_db
+# Restore a specific backup
+./scripts/restore.sh prod /var/backups/ductifact/prod/20260412_030000.sql.gz
 ```
 
-### Automated backups (cron)
+### Cron setup (daily at 3:00 AM)
 
 ```bash
-# Edit deploy user's crontab
 crontab -e
+0 3 * * * cd /opt/ductifact && ./scripts/backup.sh prod >> /var/log/ductifact-backup.log 2>&1
+```
 
-# Daily production backup at 3am, keep last 7 days
-0 3 * * * docker exec ductifact_prod_postgres pg_dump -U ductifact_user ductifact_db | gzip > ~/backups/prod_$(date +\%Y\%m\%d).sql.gz && find ~/backups -name "prod_*.sql.gz" -mtime +7 -delete
+Retention: 7 days (configurable in `backup.sh`).
 
-# Daily staging backup at 4am (optional, less critical), keep last 3 days
-0 4 * * * docker exec ductifact_staging_postgres pg_dump -U ductifact_staging_user ductifact_staging_db | gzip > ~/backups/staging_$(date +\%Y\%m\%d).sql.gz && find ~/backups -name "staging_*.sql.gz" -mtime +3 -delete
+### Database diagnostics
+
+```bash
+# Load environment variables first
+source .env.staging   # or .env.prod
+
+# Check current migration version
+docker exec ductifact_${ENV}_postgres \
+  psql -U $DB_USER -d $DB_NAME -c "SELECT * FROM schema_migrations;"
+
+# Row count per table
+docker exec ductifact_${ENV}_postgres \
+  psql -U $DB_USER -d $DB_NAME -c "SELECT relname, n_live_tup FROM pg_stat_user_tables ORDER BY n_live_tup DESC;"
+
+# Database size
+docker exec ductifact_${ENV}_postgres \
+  psql -U $DB_USER -d $DB_NAME -c "SELECT pg_size_pretty(pg_database_size('$DB_NAME'));"
+
+# List available backups
+ls -lh /var/backups/ductifact/${ENV}/
 ```
 
 ---
@@ -146,7 +163,7 @@ docker compose --env-file .env.staging down
 # Remove the data volume (staging only!)
 docker volume rm ductifact_staging_postgres_data
 
-# Bring it back up (GORM AutoMigrate recreates tables on app startup)
+# Bring it back up
 docker compose --env-file .env.staging up -d
 ```
 
