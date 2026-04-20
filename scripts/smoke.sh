@@ -4,9 +4,10 @@
 # Verifies that all services are healthy and communicating:
 #   1. App API responds on /health
 #   2. PostgreSQL is reachable (via app health)
-#   3. Prometheus is healthy
-#   4. Prometheus is scraping the app successfully
-#   5. Grafana is healthy
+#   3. MinIO is healthy
+#   4. Prometheus is healthy
+#   5. Prometheus is scraping the app successfully
+#   6. Grafana is healthy
 #
 # Usage:
 #   ./scripts/smoke.sh <environment>
@@ -86,7 +87,24 @@ else
   fail "/metrics endpoint is not reachable"
 fi
 
-# ── 3. Prometheus health ────────────────────────────────────
+# ── 3. MinIO health ─────────────────────────────────────────
+echo ""
+MINIO_CONTAINER="ductifact_${ENV}_minio"
+echo "MinIO (${MINIO_CONTAINER}):"
+
+if docker inspect --format='{{.State.Running}}' "$MINIO_CONTAINER" 2>/dev/null | grep -q true; then
+  pass "MinIO container is running"
+else
+  fail "MinIO container is not running"
+fi
+
+if docker exec "$MINIO_CONTAINER" curl -sf --max-time 5 http://localhost:9000/minio/health/live > /dev/null 2>&1; then
+  pass "MinIO health endpoint responds OK"
+else
+  fail "MinIO health endpoint is not reachable"
+fi
+
+# ── 4. Prometheus health ────────────────────────────────────
 echo ""
 echo "Prometheus (${PROM_URL}):"
 
@@ -96,7 +114,7 @@ else
   fail "Prometheus is not reachable"
 fi
 
-# ── 4. Prometheus scraping the app ──────────────────────────
+# ── 5. Prometheus scraping the app ──────────────────────────
 TARGETS_JSON=$(curl -sf --max-time 5 "${PROM_URL}/api/v1/targets" 2>/dev/null || echo "")
 
 if [[ -n "$TARGETS_JSON" ]]; then
@@ -112,7 +130,7 @@ else
   fail "Could not query Prometheus targets API"
 fi
 
-# ── 5. Grafana health ──────────────────────────────────────
+# ── 6. Grafana health ──────────────────────────────────────
 echo ""
 echo "Grafana (${GRAF_URL}):"
 

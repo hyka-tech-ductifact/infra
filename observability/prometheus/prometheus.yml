@@ -12,6 +12,12 @@ scrape_configs:
     static_configs:
       - targets: ["app:8080"]
 
+  # ── MinIO ──────────────────────────────────────────────
+  - job_name: "minio"
+    metrics_path: /minio/v2/metrics/cluster
+    static_configs:
+      - targets: ["minio:9000"]
+
   # ── Prometheus self-monitoring ─────────────────────────
   - job_name: "prometheus"
     static_configs:
