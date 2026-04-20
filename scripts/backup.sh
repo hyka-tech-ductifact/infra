@@ -6,12 +6,13 @@
 #
 #   environment: local | staging | prod
 #
-# Creates a gzip-compressed pg_dump in /var/backups/ductifact/<env>/
-# and removes backups older than RETENTION_DAYS.
+# Creates a gzip-compressed pg_dump in $HOME/backups/ductifact/<env>/
+# (override with BACKUP_DIR in .env.<env>) and removes backups older
+# than RETENTION_DAYS.
 #
 # Cron setup (daily at 3:00 AM):
 #   crontab -e
-#   0 3 * * * cd /opt/ductifact && ./scripts/backup.sh prod >> /var/log/ductifact-backup.log 2>&1
+#   0 3 * * * cd ~/ductifact/infra && ./scripts/backup.sh prod >> ~/backups/ductifact/backup.log 2>&1
 #
 # Restore with:
 #   ./scripts/restore.sh <environment> [backup_file]
