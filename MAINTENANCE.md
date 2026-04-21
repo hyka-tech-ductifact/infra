@@ -32,27 +32,30 @@ docker compose --env-file .env.staging logs -f
 
 ### Automated backups (recommended)
 
-Use the backup/restore scripts in `scripts/`:
+Use `scripts/db.sh` to manage backups:
 
 ```bash
 # Create a backup (saves to /var/backups/ductifact/<env>/)
-./scripts/backup.sh prod
+./scripts/db.sh backup prod
+
+# List available backups
+./scripts/db.sh list prod
 
 # Restore the latest backup
-./scripts/restore.sh prod
+./scripts/db.sh restore prod
 
 # Restore a specific backup
-./scripts/restore.sh prod /var/backups/ductifact/prod/20260412_030000.sql.gz
+./scripts/db.sh restore prod /var/backups/ductifact/prod/20260412_030000.sql.gz
 ```
 
 ### Cron setup (daily at 3:00 AM)
 
 ```bash
 crontab -e
-0 3 * * * cd /opt/ductifact && ./scripts/backup.sh prod >> /var/log/ductifact-backup.log 2>&1
+0 3 * * * cd /opt/ductifact && ./scripts/db.sh backup prod >> /var/log/ductifact-backup.log 2>&1
 ```
 
-Retention: 7 days (configurable in `backup.sh`).
+Retention: 7 days (configurable in `db.sh`).
 
 ### Database diagnostics
 
