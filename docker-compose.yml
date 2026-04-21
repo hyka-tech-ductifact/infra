@@ -89,8 +89,6 @@ services:
     image: prom/prometheus:v3.3.0
     container_name: ductifact_${ENV}_prometheus
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:${PROMETHEUS_PORT}:9090"
     volumes:
       - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
