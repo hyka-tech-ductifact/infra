@@ -121,19 +121,24 @@ else
 fi
 
 # ── 5. Prometheus scraping the app ──────────────────────────
-TARGETS_JSON=$(docker exec "$PROM_CONTAINER" wget -qO- --timeout=5 http://localhost:9090/api/v1/targets 2>/dev/null || echo "")
-
-if [[ -n "$TARGETS_JSON" ]]; then
-  # Check that the ductifact-api job target is "up"
-  if echo "$TARGETS_JSON" | grep -q '"job":"ductifact-api"' && \
+# Prometheus may need a few seconds to complete the first scrape after startup.
+SCRAPE_OK=false
+for i in 1 2 3 4 5; do
+  TARGETS_JSON=$(docker exec "$PROM_CONTAINER" wget -qO- --timeout=5 http://localhost:9090/api/v1/targets 2>/dev/null || echo "")
+  if [[ -n "$TARGETS_JSON" ]] && \
+     echo "$TARGETS_JSON" | grep -q '"job":"ductifact-api"' && \
      echo "$TARGETS_JSON" | grep -q '"health":"up"'; then
-    pass "Scraping ductifact-api target (health=up)"
-  else
-    info "Prometheus reachable but ductifact-api target is not up yet"
-    fail "ductifact-api target not healthy"
+    SCRAPE_OK=true
+    break
   fi
+  sleep 3
+done
+
+if [[ "$SCRAPE_OK" == true ]]; then
+  pass "Scraping ductifact-api target (health=up)"
 else
-  fail "Could not query Prometheus targets API"
+  info "Prometheus reachable but ductifact-api target is not up yet (waited 15s)"
+  fail "ductifact-api target not healthy"
 fi
 
 # ── 6. Grafana health ──────────────────────────────────────
