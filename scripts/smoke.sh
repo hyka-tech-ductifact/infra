@@ -123,7 +123,7 @@ fi
 # ── 5. Prometheus scraping the app ──────────────────────────
 # Prometheus may need a few seconds to complete the first scrape after startup.
 SCRAPE_OK=false
-for i in 1 2 3 4 5; do
+for _ in 1 2 3 4 5; do
   TARGETS_JSON=$(docker exec "$PROM_CONTAINER" wget -qO- --timeout=5 http://localhost:9090/api/v1/targets 2>/dev/null || echo "")
   if [[ -n "$TARGETS_JSON" ]] && \
      echo "$TARGETS_JSON" | grep -q '"job":"ductifact-api"' && \
