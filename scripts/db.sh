@@ -18,6 +18,8 @@
 #   ./scripts/db.sh list    prod
 #
 # Cron setup (daily at 3:00 AM):
+# crontab -e (to edit)
+# crontab -l (to list)
 #   0 3 * * * cd ~/ductifact/infra && ./scripts/db.sh backup prod >> ~/backups/ductifact/backup.log 2>&1
 
 set -euo pipefail
