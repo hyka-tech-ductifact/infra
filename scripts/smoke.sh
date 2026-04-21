@@ -64,7 +64,7 @@ source "$ENV_FILE"
 set +a
 
 BASE_URL="http://localhost:${APP_PORT}"
-PROM_URL="http://localhost:${PROMETHEUS_PORT}"
+PROM_CONTAINER="ductifact_${ENV}_prometheus"
 GRAF_URL="http://localhost:${GRAFANA_PORT}"
 
 echo ""
@@ -106,16 +106,22 @@ fi
 
 # ── 4. Prometheus health ────────────────────────────────────
 echo ""
-echo "Prometheus (${PROM_URL}):"
+echo "Prometheus (${PROM_CONTAINER}):"
 
-if curl -sf --max-time 5 "${PROM_URL}/-/healthy" > /dev/null 2>&1; then
+if docker inspect --format='{{.State.Running}}' "$PROM_CONTAINER" 2>/dev/null | grep -q true; then
+  pass "Prometheus container is running"
+else
+  fail "Prometheus container is not running"
+fi
+
+if docker exec "$PROM_CONTAINER" wget -qO- --timeout=5 http://localhost:9090/-/healthy > /dev/null 2>&1; then
   pass "Prometheus is healthy"
 else
   fail "Prometheus is not reachable"
 fi
 
 # ── 5. Prometheus scraping the app ──────────────────────────
-TARGETS_JSON=$(curl -sf --max-time 5 "${PROM_URL}/api/v1/targets" 2>/dev/null || echo "")
+TARGETS_JSON=$(docker exec "$PROM_CONTAINER" wget -qO- --timeout=5 http://localhost:9090/api/v1/targets 2>/dev/null || echo "")
 
 if [[ -n "$TARGETS_JSON" ]]; then
   # Check that the ductifact-api job target is "up"
