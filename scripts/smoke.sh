@@ -2,8 +2,8 @@
 # smoke.sh — Post-deploy smoke tests for a ductifact environment.
 #
 # Verifies that all services are healthy and communicating:
-#   1. App API responds on /health
-#   2. PostgreSQL is reachable (via app health)
+#   1. App API responds on /healthz (liveness) and /readyz (readiness)
+#   2. PostgreSQL is reachable (via /readyz)
 #   3. MinIO is healthy
 #   4. Prometheus is healthy
 #   5. Prometheus is scraping the app successfully
@@ -74,10 +74,16 @@ echo ""
 # ── 1. App health endpoint ──────────────────────────────────
 echo "App (${BASE_URL}):"
 
-if curl -sf --max-time 5 "${BASE_URL}/health" > /dev/null 2>&1; then
-  pass "/health responds OK"
+if curl -sf --max-time 5 "${BASE_URL}/healthz" > /dev/null 2>&1; then
+  pass "/healthz (liveness) responds OK"
 else
-  fail "/health is not reachable"
+  fail "/healthz (liveness) is not reachable"
+fi
+
+if curl -sf --max-time 5 "${BASE_URL}/readyz" > /dev/null 2>&1; then
+  pass "/readyz (readiness) responds OK"
+else
+  fail "/readyz (readiness) is not reachable"
 fi
 
 # ── 2. App metrics endpoint (Prometheus exposition) ─────────
