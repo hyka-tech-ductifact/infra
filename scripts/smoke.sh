@@ -81,9 +81,15 @@ else
 fi
 
 if curl -sf --max-time 5 "${BASE_URL}/readyz" > /dev/null 2>&1; then
-  pass "/readyz (readiness) responds OK"
+  READYZ_BODY=$(curl -s --max-time 5 "${BASE_URL}/readyz")
+  READYZ_STATUS=$(echo "$READYZ_BODY" | grep -o '"status":"[^"]*"' | head -1)
+  if echo "$READYZ_STATUS" | grep -q '"status":"ready"'; then
+    pass "/readyz (readiness) responds OK — ready"
+  elif echo "$READYZ_STATUS" | grep -q '"status":"degraded"'; then
+    pass "/readyz (readiness) responds OK — degraded (non-critical dependency down)"
+  fi
 else
-  fail "/readyz (readiness) is not reachable"
+  fail "/readyz (readiness) is not reachable (503 or timeout)"
 fi
 
 # ── 2. App metrics endpoint (Prometheus exposition) ─────────
