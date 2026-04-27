@@ -86,7 +86,11 @@ if curl -sf --max-time 5 "${BASE_URL}/readyz" > /dev/null 2>&1; then
   if echo "$READYZ_STATUS" | grep -q '"status":"ready"'; then
     pass "/readyz (readiness) responds OK — ready"
   elif echo "$READYZ_STATUS" | grep -q '"status":"degraded"'; then
-    pass "/readyz (readiness) responds OK — degraded (non-critical dependency down)"
+    echo -e "  ${YELLOW}⚠${NC} /readyz (readiness) responds OK — degraded"
+    DEGRADED_SERVICES=$(echo "$READYZ_BODY" | grep -o '"warnings":\[[^]]*\]' | sed 's/"warnings":\[//;s/\]//;s/"//g' | tr ',' '\n')
+    while IFS= read -r svc; do
+      [[ -n "$svc" ]] && echo -e "    ${YELLOW}↳${NC} $svc"
+    done <<< "$DEGRADED_SERVICES"
   fi
 else
   fail "/readyz (readiness) is not reachable (503 or timeout)"
