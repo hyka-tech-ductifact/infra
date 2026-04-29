@@ -5,9 +5,10 @@
 #   1. App API responds on /healthz (liveness) and /readyz (readiness)
 #   2. PostgreSQL is reachable (via /readyz)
 #   3. MinIO is healthy
-#   4. Prometheus is healthy
-#   5. Prometheus is scraping the app successfully
-#   6. Grafana is healthy
+#   4. Redis is healthy
+#   5. Prometheus is healthy
+#   6. Prometheus is scraping the app successfully
+#   7. Grafana is healthy
 #
 # Usage:
 #   ./scripts/smoke.sh <environment>
@@ -120,7 +121,24 @@ else
   fail "MinIO health endpoint is not reachable"
 fi
 
-# ── 4. Prometheus health ────────────────────────────────────
+# ── 4. Redis health ─────────────────────────────────────────
+echo ""
+REDIS_CONTAINER="ductifact_${ENV}_redis"
+echo "Redis (${REDIS_CONTAINER}):"
+
+if docker inspect --format='{{.State.Running}}' "$REDIS_CONTAINER" 2>/dev/null | grep -q true; then
+  pass "Redis container is running"
+else
+  fail "Redis container is not running"
+fi
+
+if docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" --no-auth-warning ping 2>/dev/null | grep -q PONG; then
+  pass "Redis responds to PING"
+else
+  fail "Redis is not responding to PING"
+fi
+
+# ── 5. Prometheus health ────────────────────────────────────
 echo ""
 echo "Prometheus (${PROM_CONTAINER}):"
 
@@ -136,7 +154,7 @@ else
   fail "Prometheus is not reachable"
 fi
 
-# ── 5. Prometheus scraping the app ──────────────────────────
+# ── 6. Prometheus scraping the app ──────────────────────────
 # Prometheus may need a few seconds to complete the first scrape after startup.
 SCRAPE_OK=false
 for _ in 1 2 3 4 5; do
@@ -157,7 +175,7 @@ else
   fail "ductifact-api target not healthy"
 fi
 
-# ── 6. Grafana health ──────────────────────────────────────
+# ── 7. Grafana health ──────────────────────────────────────
 echo ""
 echo "Grafana (${GRAF_URL}):"
 
