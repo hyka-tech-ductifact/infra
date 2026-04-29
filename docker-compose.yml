@@ -42,6 +42,22 @@ services:
     networks:
       - internal
 
+  # ── Redis ──────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: ductifact_${ENV}_redis
+    restart: unless-stopped
+    command: redis-server --requirepass "${REDIS_PASSWORD}"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
   # ── Backend API ────────────────────────────────────────────
   app:
     image: ${APP_IMAGE}
@@ -86,10 +102,17 @@ services:
       - VERIFICATION_BASE_URL=${VERIFICATION_BASE_URL}
       - VERIFICATION_EMAIL_TOKEN_TTL=${VERIFICATION_EMAIL_TOKEN_TTL}
       - VERIFICATION_PASSWORD_RESET_TOKEN_TTL=${VERIFICATION_PASSWORD_RESET_TOKEN_TTL}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_AUTH=true
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_DB=${REDIS_DB}
     depends_on:
       postgres:
         condition: service_healthy
       minio:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - internal
@@ -131,6 +154,7 @@ services:
 volumes:
   postgres_data:
   minio_data:
+  redis_data:
   prometheus_data:
   grafana_data:
 
