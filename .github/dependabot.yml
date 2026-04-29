@@ -1,0 +1,26 @@
+# Dependabot version updates — opens PRs when dependencies have new releases.
+# Alerts and security updates are configured in the GitHub web UI (enabled by default).
+# Docs: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates
+
+version: 2
+
+# Group all ecosystems into a single weekly PR
+multi-ecosystem-groups:
+  all-deps:
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+
+updates:
+  # Docker images (postgres, redis, minio, prometheus, grafana)
+  - package-ecosystem: "docker"
+    directory: "/"
+    patterns: ["*"]
+    multi-ecosystem-group: "all-deps"
+
+  # GitHub Actions (actions/checkout, etc.)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    patterns: ["*"]
+    multi-ecosystem-group: "all-deps"
