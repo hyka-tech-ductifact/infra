@@ -64,7 +64,7 @@ set -a
 source "$ENV_FILE"
 set +a
 
-BASE_URL="http://localhost:${APP_PORT}"
+BASE_URL="http://localhost:${BACKEND_PORT}"
 PROM_CONTAINER="ductifact_${ENV}_prometheus"
 GRAF_URL="http://localhost:${GRAFANA_PORT}"
 

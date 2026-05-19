@@ -152,14 +152,14 @@ cmd_restore() {
 
   require_container
 
-  # Stop the app to prevent connections during restore
-  APP_CONTAINER="ductifact_${ENV}_app"
-  APP_WAS_RUNNING=false
+  # Stop the backend to prevent connections during restore
+  BACKEND_CONTAINER="ductifact_${ENV}_backend"
+  BACKEND_WAS_RUNNING=false
 
-  if docker inspect --format='{{.State.Running}}' "$APP_CONTAINER" 2>/dev/null | grep -q true; then
-    echo "Stopping app container to prevent active connections..."
-    docker stop "$APP_CONTAINER" >/dev/null
-    APP_WAS_RUNNING=true
+  if docker inspect --format='{{.State.Running}}' "$BACKEND_CONTAINER" 2>/dev/null | grep -q true; then
+    echo "Stopping backend container to prevent active connections..."
+    docker stop "$BACKEND_CONTAINER" >/dev/null
+    BACKEND_WAS_RUNNING=true
   fi
 
   # Restore
@@ -178,11 +178,11 @@ cmd_restore() {
 
   echo "Restore complete."
 
-  # Restart app if it was running
-  if [[ "$APP_WAS_RUNNING" == true ]]; then
-    echo "Restarting app container..."
-    docker start "$APP_CONTAINER" >/dev/null
-    echo "App restarted. Migrations will run automatically on startup."
+  # Restart backend if it was running
+  if [[ "$BACKEND_WAS_RUNNING" == true ]]; then
+    echo "Restarting backend container..."
+    docker start "$BACKEND_CONTAINER" >/dev/null
+    echo "Backend restarted. Migrations will run automatically on startup."
   fi
 }
 

@@ -8,10 +8,10 @@ Operational procedures for the Ductifact production and staging environments run
 
 ```bash
 # Production API (last 100 lines, live)
-docker logs -f --tail=100 ductifact_prod_app
+docker logs -f --tail=100 ductifact_prod_backend
 
 # Staging API
-docker logs -f --tail=100 ductifact_staging_app
+docker logs -f --tail=100 ductifact_staging_backend
 
 # Caddy (reverse proxy)
 sudo journalctl -u caddy -f

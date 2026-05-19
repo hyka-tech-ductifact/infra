@@ -66,17 +66,25 @@ if [[ "$ACTION" == "stop" ]]; then
 fi
 
 # ── Deploy ───────────────────────────────────────────────────
-CONTAINER="ductifact_${ENV}_app"
+CONTAINER_BACKEND="ductifact_${ENV}_backend"
+CONTAINER_FRONTEND="ductifact_${ENV}_frontend"
 
-# Read APP_IMAGE from env file
-APP_IMAGE=$(grep -E '^APP_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
-if [[ -z "$APP_IMAGE" ]]; then
-  echo "ERROR: APP_IMAGE not defined in $ENV_FILE"
+# Read images from env file
+BACKEND_IMAGE=$(grep -E '^BACKEND_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
+FRONTEND_IMAGE=$(grep -E '^FRONTEND_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
+
+if [[ -z "$BACKEND_IMAGE" ]]; then
+  echo "ERROR: BACKEND_IMAGE not defined in $ENV_FILE"
+  exit 1
+fi
+if [[ -z "$FRONTEND_IMAGE" ]]; then
+  echo "ERROR: FRONTEND_IMAGE not defined in $ENV_FILE"
   exit 1
 fi
 
 echo "=== Deploying $ENV ==="
-echo "Image:     $APP_IMAGE"
+echo "Backend:   $BACKEND_IMAGE"
+echo "Frontend:  $FRONTEND_IMAGE"
 echo "Env file:  $ENV_FILE"
 echo "Directory: $INFRA_DIR"
 
@@ -94,25 +102,29 @@ if [[ "$ENV" != "local" ]]; then
   git pull --ff-only origin main
 fi
 
-# ── Pull Docker image (skip for local) ───────────────────────
+# ── Pull Docker images (skip for local) ──────────────────────
 if [[ "$ENV" != "local" ]]; then
-  echo "Pulling image..."
-  docker pull "$APP_IMAGE"
+  echo "Pulling images..."
+  docker pull "$BACKEND_IMAGE"
+  docker pull "$FRONTEND_IMAGE"
 fi
 
 # ── Restart containers ───────────────────────────────────────
 echo "Restarting containers..."
 docker compose --env-file "$ENV_FILE" up -d
 
-# ── Verify container is running ──────────────────────────────
-echo "Waiting for container to start..."
+# ── Verify containers are running ────────────────────────────
+echo "Waiting for containers to start..."
 sleep 5
 
-if ! docker inspect --format='{{.State.Running}}' "$CONTAINER" 2>/dev/null | grep -q true; then
-  echo "ERROR: $CONTAINER is not running"
-  docker logs --tail=30 "$CONTAINER"
-  exit 1
-fi
+for CONTAINER in "$CONTAINER_BACKEND" "$CONTAINER_FRONTEND"; do
+  if ! docker inspect --format='{{.State.Running}}' "$CONTAINER" 2>/dev/null | grep -q true; then
+    echo "ERROR: $CONTAINER is not running"
+    docker logs --tail=30 "$CONTAINER"
+    exit 1
+  fi
+  echo "✅ $CONTAINER is running"
+done
 
 # ── Cleanup ──────────────────────────────────────────────────
 docker image prune -f
@@ -124,6 +136,6 @@ if "${SCRIPT_DIR}/smoke.sh" "$ENV"; then
 else
   echo "ERROR: Deploy completed but smoke tests failed!"
   echo "Services may not be healthy. Check logs with:"
-  echo "  docker logs ductifact_${ENV}_app --tail=50"
+  echo "  docker logs ductifact_${ENV}_backend --tail=50"
   exit 1
 fi
