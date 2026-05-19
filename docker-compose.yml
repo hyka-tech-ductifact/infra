@@ -59,20 +59,20 @@ services:
       - internal
 
   # ── Backend API ────────────────────────────────────────────
-  app:
-    image: ${APP_IMAGE}
-    container_name: ductifact_${ENV}_app
+  backend:
+    image: ${BACKEND_IMAGE}
+    container_name: ductifact_${ENV}_backend
     restart: unless-stopped
     ports:
-      - "127.0.0.1:${APP_PORT}:8080"
+      - "127.0.0.1:${BACKEND_PORT}:8080"
     environment:
       - DB_HOST=postgres
       - DB_PORT=5432
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
       - DB_NAME=${DB_NAME}
-      - APP_HOST=${APP_HOST}
-      - APP_PORT=8080
+      - BACKEND_HOST=${BACKEND_HOST}
+      - BACKEND_PORT=8080
       - JWT_SECRET=${JWT_SECRET}
       - JWT_TOKEN_DURATION=${JWT_TOKEN_DURATION}
       - JWT_REFRESH_TOKEN_DURATION=${JWT_REFRESH_TOKEN_DURATION}
@@ -114,6 +114,23 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    networks:
+      - internal
+
+  # ── Frontend (Angular + Nginx) ─────────────────────────────
+  frontend:
+    image: ${FRONTEND_IMAGE}
+    container_name: ductifact_${ENV}_frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT}:8080"
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     networks:
       - internal
 

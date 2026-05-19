@@ -66,7 +66,7 @@ set -a
 source "$ENV_FILE"
 set +a
 
-BASE_URL="http://localhost:${APP_PORT}/v1"
+BASE_URL="http://localhost:${BACKEND_PORT}/v1"
 TIMESTAMP=$(date +%s)
 EMAIL="flow-${TIMESTAMP}@test.ductifact.dev"
 
@@ -185,7 +185,7 @@ step "5. Verify image via file proxy"
 
 if [[ -n "$IMAGE_URL" ]]; then
   # IMAGE_URL is a path like /v1/files/piece-definitions/uuid/original.png
-  PROXY_BASE="http://localhost:${APP_PORT}"
+  PROXY_BASE="http://localhost:${BACKEND_PORT}"
   IMG_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${PROXY_BASE}${IMAGE_URL}" 2>&1)
   assert_status "$IMG_STATUS" "200" "GET original image"
 
@@ -259,7 +259,7 @@ assert_status "$(echo "$DEL_CLIENT" | tail -1)" "204" "DELETE client"
 
 # Verify image is gone after piece def deletion
 if [[ -n "$IMAGE_URL" ]]; then
-  PROXY_BASE="http://localhost:${APP_PORT}"
+  PROXY_BASE="http://localhost:${BACKEND_PORT}"
   GONE_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${PROXY_BASE}${IMAGE_URL}" 2>&1)
   assert_status "$GONE_STATUS" "404" "Image cleaned up after delete"
 fi

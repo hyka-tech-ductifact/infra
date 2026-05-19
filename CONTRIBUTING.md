@@ -53,7 +53,7 @@ cd ~/ductifact/infra
 # Verify again
 ```
 
-The script reads `APP_IMAGE` from `.env.<environment>`, pulls the image, restarts containers, and verifies the app is running.
+The script reads `BACKEND_IMAGE` and `FRONTEND_IMAGE` from `.env.<environment>`, pulls both images, restarts containers, and verifies they are running.
 
 For **local testing** (no git pull, no docker pull):
 
