@@ -131,13 +131,13 @@ fi
 # ── Pull Docker images (skip for local) ──────────────────────
 if [[ "$ENV" != "local" ]]; then
   echo "Pulling images..."
-  docker pull "$BACKEND_IMAGE"
-  docker pull "$FRONTEND_IMAGE"
+  docker pull "$BACKEND_IMAGE" || echo "⚠ Backend image not found — skipping pull"
+  docker pull "$FRONTEND_IMAGE" || echo "⚠ Frontend image not found — skipping pull"
 fi
 
 # ── Restart containers ───────────────────────────────────────
 echo "Restarting containers..."
-docker compose --env-file "$ENV_FILE" up -d
+docker compose --env-file "$ENV_FILE" up -d --remove-orphans
 
 # ── Verify containers are running ────────────────────────────
 echo "Waiting for containers to start..."
