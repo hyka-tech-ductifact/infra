@@ -1,0 +1,60 @@
+name: Deploy Staging
+
+# ─── Triggered by backend/frontend repos after building an image ───
+# Auto-deploys to staging. No PR needed — staging is always latest.
+on:
+  repository_dispatch:
+    types: [image-published]
+
+jobs:
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update staging manifest
+        run: |
+          SERVICE="${{ github.event.client_payload.service }}"
+          IMAGE="${{ github.event.client_payload.image }}"
+          MANIFEST="environments/staging.manifest.env"
+
+          echo "Updating $SERVICE to $IMAGE in $MANIFEST"
+
+          if [[ "$SERVICE" == "backend" ]]; then
+            sed -i "s|^BACKEND_IMAGE=.*|BACKEND_IMAGE=${IMAGE}|" "$MANIFEST"
+          elif [[ "$SERVICE" == "frontend" ]]; then
+            sed -i "s|^FRONTEND_IMAGE=.*|FRONTEND_IMAGE=${IMAGE}|" "$MANIFEST"
+          else
+            echo "ERROR: Unknown service '$SERVICE'"
+            exit 1
+          fi
+
+      - name: Commit manifest update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add environments/staging.manifest.env
+          git commit -m "staging(${{ github.event.client_payload.service }}): sha-${{ github.event.client_payload.sha }}" || echo "No changes to commit"
+          git push
+
+      # ── Deploy via SSH through Cloudflare Tunnel ───────────
+      - name: Install cloudflared
+        run: |
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb \
+            -o /tmp/cloudflared.deb
+          sudo dpkg -i /tmp/cloudflared.deb
+
+      - name: Deploy to staging server
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+          ssh -o StrictHostKeyChecking=no \
+              -o UserKnownHostsFile=/dev/null \
+              -o "ProxyCommand=cloudflared access ssh --hostname %h --id ${{ secrets.CF_ACCESS_CLIENT_ID }} --secret ${{ secrets.CF_ACCESS_CLIENT_SECRET }}" \
+              -i ~/.ssh/deploy_key \
+              ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+              "~/ductifact/infra/scripts/deploy.sh staging"
