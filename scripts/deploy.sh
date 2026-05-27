@@ -69,6 +69,12 @@ fi
 CONTAINER_BACKEND="ductifact_${ENV}_backend"
 CONTAINER_FRONTEND="ductifact_${ENV}_frontend"
 
+# ── Pull latest infra config (skip for local) ────────────────
+if [[ "$ENV" != "local" ]]; then
+  echo "Pulling latest infra config..."
+  git pull --ff-only origin main
+fi
+
 # ── Read images from manifest (environments/<env>.manifest.env) ───────
 # The manifest is the source of truth for which image versions to deploy.
 # Falls back to .env.<env> if no manifest exists (backward compat).
@@ -121,12 +127,6 @@ if ! "${SCRIPT_DIR}/validate.sh" "$ENV"; then
   exit 1
 fi
 echo ""
-
-# ── Pull latest infra config (skip for local) ────────────────
-if [[ "$ENV" != "local" ]]; then
-  echo "Pulling latest infra config..."
-  git pull --ff-only origin main
-fi
 
 # ── Pull Docker images (skip for local) ──────────────────────
 if [[ "$ENV" != "local" ]]; then
