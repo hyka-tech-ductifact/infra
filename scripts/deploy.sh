@@ -69,22 +69,48 @@ fi
 CONTAINER_BACKEND="ductifact_${ENV}_backend"
 CONTAINER_FRONTEND="ductifact_${ENV}_frontend"
 
-# Read images from env file
-BACKEND_IMAGE=$(grep -E '^BACKEND_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
-FRONTEND_IMAGE=$(grep -E '^FRONTEND_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
+# ── Read images from manifest (environments/<env>.manifest.env) ───────
+# The manifest is the source of truth for which image versions to deploy.
+# Falls back to .env.<env> if no manifest exists (backward compat).
+case "$ENV" in
+  local)
+    MANIFEST_FILE="${INFRA_DIR}/environments/local.manifest.env"
+    ;;
+  staging)
+    MANIFEST_FILE="${INFRA_DIR}/environments/staging.manifest.env"
+    ;;
+  prod)
+    MANIFEST_FILE="${INFRA_DIR}/environments/production.manifest.env"
+    ;;
+esac
+
+if [[ -f "$MANIFEST_FILE" ]]; then
+  echo "Reading image versions from manifest: $MANIFEST_FILE"
+  BACKEND_IMAGE=$(grep -E '^BACKEND_IMAGE=' "$MANIFEST_FILE" | cut -d'=' -f2-)
+  FRONTEND_IMAGE=$(grep -E '^FRONTEND_IMAGE=' "$MANIFEST_FILE" | cut -d'=' -f2-)
+else
+  echo "No manifest found at $MANIFEST_FILE, reading from $ENV_FILE"
+  BACKEND_IMAGE=$(grep -E '^BACKEND_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
+  FRONTEND_IMAGE=$(grep -E '^FRONTEND_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
+fi
 
 if [[ -z "$BACKEND_IMAGE" ]]; then
-  echo "ERROR: BACKEND_IMAGE not defined in $ENV_FILE"
+  echo "ERROR: BACKEND_IMAGE not defined"
   exit 1
 fi
 if [[ -z "$FRONTEND_IMAGE" ]]; then
-  echo "ERROR: FRONTEND_IMAGE not defined in $ENV_FILE"
+  echo "ERROR: FRONTEND_IMAGE not defined"
   exit 1
 fi
+
+# Export so docker compose can use them (overrides .env.<env> values)
+export BACKEND_IMAGE
+export FRONTEND_IMAGE
 
 echo "=== Deploying $ENV ==="
 echo "Backend:   $BACKEND_IMAGE"
 echo "Frontend:  $FRONTEND_IMAGE"
+echo "Manifest:  ${MANIFEST_FILE:-none}"
 echo "Env file:  $ENV_FILE"
 echo "Directory: $INFRA_DIR"
 
