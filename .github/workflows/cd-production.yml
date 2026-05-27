@@ -82,7 +82,7 @@ jobs:
               -o "ProxyCommand=cloudflared access ssh --hostname %h --id ${{ secrets.CF_ACCESS_CLIENT_ID }} --secret ${{ secrets.CF_ACCESS_CLIENT_SECRET }}" \
               -i ~/.ssh/deploy_key \
               ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
-              "~/ductifact/infra/scripts/deploy.sh prod"
+              "cd ~/ductifact/infra && git pull --ff-only origin main && ./scripts/deploy.sh prod"
 
       - name: Deploy summary
         if: success()
