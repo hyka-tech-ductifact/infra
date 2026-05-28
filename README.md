@@ -72,6 +72,13 @@ git push origin promote/release-2026-05-20
 # → Open PR → Review → Merge → Auto-deploy
 ```
 
+### Production Versioning (Tags & Releases)
+
+- Every successful production deploy creates a git tag + GitHub Release in this repo.
+- Default behavior (push trigger): auto-bump patch version (`vX.Y.Z` → `vX.Y.(Z+1)`).
+- Manual deploy (`workflow_dispatch`): you can provide `version` (example: `v0.5.0`).
+- Release notes include deployed backend/frontend image refs from `environments/production.manifest.env`.
+
 ### Rollback
 
 ```bash

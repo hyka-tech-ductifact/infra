@@ -15,6 +15,10 @@ on:
         description: "Type 'deploy' to confirm production deployment"
         required: true
         type: string
+      version:
+        description: "Optional release version (example: v0.5.0 or 0.5.0). Empty = auto bump patch."
+        required: false
+        type: string
 
 concurrency:
   group: deploy-production
@@ -24,6 +28,8 @@ jobs:
   deploy-production:
     name: Deploy to Production
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     # For workflow_dispatch, require explicit confirmation
     if: >-
@@ -32,6 +38,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Read manifest
         id: manifest
@@ -45,6 +53,56 @@ jobs:
           echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| Backend | \`$BACKEND_IMAGE\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Frontend | \`$FRONTEND_IMAGE\` |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Resolve release version
+        id: release_version
+        run: |
+          set -euo pipefail
+
+          INPUT_VERSION="${{ github.event.inputs.version || '' }}"
+
+          normalize_version() {
+            local value="$1"
+            value="${value#v}"
+            if [[ "$value" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "v${value}"
+            else
+              echo ""
+            fi
+          }
+
+          if [[ -n "$INPUT_VERSION" ]]; then
+            VERSION="$(normalize_version "$INPUT_VERSION")"
+            if [[ -z "$VERSION" ]]; then
+              echo "ERROR: invalid version format '$INPUT_VERSION'. Use SemVer, e.g. v0.5.0 or 0.5.0"
+              exit 1
+            fi
+          else
+            git fetch --tags --force
+            LATEST_TAG="$(git tag -l 'v*' --sort=-version:refname | head -n 1)"
+
+            if [[ -z "$LATEST_TAG" ]]; then
+              VERSION="v0.1.0"
+            else
+              BASE="${LATEST_TAG#v}"
+              if [[ ! "$BASE" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                echo "ERROR: latest tag '$LATEST_TAG' is not SemVer"
+                exit 1
+              fi
+              IFS='.' read -r major minor patch <<< "$BASE"
+              patch=$((patch + 1))
+              VERSION="v${major}.${minor}.${patch}"
+            fi
+          fi
+
+          if git show-ref --tags --verify --quiet "refs/tags/$VERSION"; then
+            echo "ERROR: tag '$VERSION' already exists"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "Release version: $VERSION"
 
       - name: Verify images exist in registry
         run: |
@@ -89,4 +147,50 @@ jobs:
         run: |
           echo "### ✅ Production deploy successful!" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Release: \`${{ steps.release_version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
           echo "Deployed at: $(date -u '+%Y-%m-%d %H:%M UTC')" >> $GITHUB_STEP_SUMMARY
+
+      - name: Create release tag
+        if: success()
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.release_version.outputs.version }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git tag -a "$VERSION" -m "Production release $VERSION"
+          git push origin "$VERSION"
+
+      - name: Publish GitHub release
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.release_version.outputs.version }}"
+          DEPLOYED_AT="$(date -u '+%Y-%m-%d %H:%M UTC')"
+
+          cat > /tmp/release-notes.md <<EOF
+          ## Production Deployment
+
+          - Release: ${VERSION}
+          - Environment: production
+          - Deployed at: ${DEPLOYED_AT}
+          - Commit: ${GITHUB_SHA}
+
+          ### Application Images
+
+          - Backend: ${{ steps.manifest.outputs.BACKEND_IMAGE }}
+          - Frontend: ${{ steps.manifest.outputs.FRONTEND_IMAGE }}
+
+          ### Source of Truth
+
+          - Manifest: environments/production.manifest.env
+          - Compose: docker-compose.yml
+          EOF
+
+          gh release create "$VERSION" \
+            --title "$VERSION" \
+            --notes-file /tmp/release-notes.md
