@@ -44,7 +44,7 @@ jobs:
         id: cpr
         uses: peter-evans/create-pull-request@v7
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.INFRA_PAT }}
           commit-message: "staging(${{ github.event.client_payload.service }}): sha-${{ github.event.client_payload.sha }}"
           branch: "staging/${{ github.event.client_payload.service }}-${{ github.event.client_payload.sha }}"
           delete-branch: true
@@ -68,7 +68,7 @@ jobs:
         if: steps.cpr.outputs.pull-request-number != ''
         uses: peter-evans/enable-pull-request-automerge@v3
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.INFRA_PAT }}
           pull-request-number: ${{ steps.cpr.outputs.pull-request-number }}
           merge-method: squash
 
