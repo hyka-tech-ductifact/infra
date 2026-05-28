@@ -1,17 +1,24 @@
 name: Deploy Staging
 
 # ─── Triggered by backend/frontend repos after building an image ───
-# Auto-deploys to staging. No PR needed — staging is always latest.
+# Opens a PR to update staging manifest; deploy runs after merge to main.
 on:
   repository_dispatch:
     types: [image-published]
 
+  push:
+    branches: [main]
+    paths:
+      - "environments/staging.manifest.env"
+
 jobs:
-  deploy-staging:
-    name: Deploy to Staging
+  propose-staging-update:
+    name: Propose Staging Manifest Update
     runs-on: ubuntu-latest
+    if: github.event_name == 'repository_dispatch'
     permissions:
       contents: write
+      pull-requests: write
 
     steps:
       - uses: actions/checkout@v4
@@ -33,13 +40,48 @@ jobs:
             exit 1
           fi
 
-      - name: Commit manifest update
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add environments/staging.manifest.env
-          git commit -m "staging(${{ github.event.client_payload.service }}): sha-${{ github.event.client_payload.sha }}" || echo "No changes to commit"
-          git push
+      - name: Create Pull Request
+        id: cpr
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "staging(${{ github.event.client_payload.service }}): sha-${{ github.event.client_payload.sha }}"
+          branch: "staging/${{ github.event.client_payload.service }}-${{ github.event.client_payload.sha }}"
+          delete-branch: true
+          title: "🚀 Update staging manifest for ${{ github.event.client_payload.service }}"
+          body: |
+            ## Staging Manifest Update
+
+            | Field | Value |
+            |-------|-------|
+            | Service | `${{ github.event.client_payload.service }}` |
+            | Image | `${{ github.event.client_payload.image }}` |
+            | SHA | `${{ github.event.client_payload.sha }}` |
+            | Source repo | `${{ github.event.client_payload.repository }}` |
+
+            Merging this PR triggers staging deploy via `cd-staging.yml`.
+          labels: |
+            staging
+            automated
+
+      - name: Enable PR auto-merge
+        if: steps.cpr.outputs.pull-request-number != ''
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          pull-request-number: ${{ steps.cpr.outputs.pull-request-number }}
+          merge-method: squash
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
 
       # ── Deploy via SSH through Cloudflare Tunnel ───────────
       - name: Install cloudflared
