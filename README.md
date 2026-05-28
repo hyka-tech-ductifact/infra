@@ -121,6 +121,13 @@ echo "YOUR_GITHUB_TOKEN" | docker login ghcr.io -u YOUR_USER --password-stdin
 - Full CD guide available at `backend/docs/GUIDE_CD.md`.
 - Server maintenance (logs, backups, rollbacks, security) documented in [`MAINTENANCE.md`](MAINTENANCE.md).
 
+## Image Versioning Policy
+
+- `docker-compose.yml` is the runtime source of truth for infrastructure services (`postgres`, `redis`, `minio`, `prometheus`, `grafana`).
+- External images should be pinned with immutable references (`tag@sha256:digest` or `@sha256:digest`) to avoid drift.
+- `environments/*.manifest.env` controls only app promotions (`BACKEND_IMAGE`, `FRONTEND_IMAGE`) and should use immutable `sha-*` tags.
+- Update flow: bump in staging first, validate smoke checks, then promote to production via PR.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for branch naming, workflow, deploy process, and PR guidelines.
