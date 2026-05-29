@@ -72,7 +72,7 @@ CONTAINER_FRONTEND="ductifact_${ENV}_frontend"
 
 # ── Pre-deploy validation ────────────────────────────────────
 echo "Running pre-deploy validation..."
-if ! "${SCRIPT_DIR}/validate.sh" "$ENV"; then
+if ! "${SCRIPT_DIR}/validate_env.sh" "$ENV"; then
   echo "ERROR: Pre-deploy validation failed. Fix .env.example / $ENV_FILE consistency first."
   exit 1
 fi

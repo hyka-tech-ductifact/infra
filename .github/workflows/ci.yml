@@ -19,4 +19,4 @@ jobs:
         run: sudo apt-get -qq install -y shellcheck > /dev/null
 
       - name: Run validation checks
-        run: ./scripts/validate.sh
+        run: ./scripts/validate_repo.sh
