@@ -5,7 +5,8 @@
 #   ./scripts/deploy.sh <environment>          # deploy + smoke tests
 #   ./scripts/deploy.sh <environment> stop     # stop all containers
 #
-#   environment: local | staging | prod
+#   environment: local | staging | production
+#   alias: prod -> production
 #
 # The only runtime source of truth is .env.<environment>.
 # This script never generates or mutates env files; it only consumes them.
@@ -16,7 +17,7 @@
 #   ./scripts/deploy.sh local            # start with local image + smoke
 #   ./scripts/deploy.sh local stop       # stop local environment
 #   ./scripts/deploy.sh staging          # pull + start staging + smoke
-#   ./scripts/deploy.sh prod stop        # stop production
+#   ./scripts/deploy.sh production stop  # stop production
 
 set -euo pipefail
 
@@ -26,14 +27,15 @@ ACTION="${2:-deploy}"
 
 if [[ -z "$ENV" ]]; then
   echo "Usage: $0 <environment> [stop]"
-  echo "  environment: local | staging | prod"
+  echo "  environment: local | staging | production"
   exit 1
 fi
 
 case "$ENV" in
-  local|staging|prod) ;;
+  prod) ENV="production" ;;
+  local|staging|production) ;;
   *)
-    echo "ERROR: unknown environment '$ENV'. Use 'local', 'staging', or 'prod'."
+    echo "ERROR: unknown environment '$ENV'. Use 'local', 'staging', or 'production'."
     exit 1
     ;;
 esac

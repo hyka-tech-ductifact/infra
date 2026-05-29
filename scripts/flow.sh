@@ -15,7 +15,8 @@
 # Usage:
 #   ./scripts/flow.sh <environment>
 #
-#   environment: local | staging | prod
+#   environment: local | staging | production
+#   alias: prod -> production
 #
 # Examples:
 #   ./scripts/flow.sh local
@@ -40,14 +41,15 @@ ENV="${1:-}"
 
 if [[ -z "$ENV" ]]; then
   echo "Usage: $0 <environment>"
-  echo "  environment: local | staging | prod"
+  echo "  environment: local | staging | production"
   exit 1
 fi
 
 case "$ENV" in
-  local|staging|prod) ;;
+  prod) ENV="production" ;;
+  local|staging|production) ;;
   *)
-    echo "ERROR: unknown environment '$ENV'. Use 'local', 'staging', or 'prod'."
+    echo "ERROR: unknown environment '$ENV'. Use 'local', 'staging', or 'production'."
     exit 1
     ;;
 esac
