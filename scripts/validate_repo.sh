@@ -11,7 +11,8 @@
 #   4. ShellCheck on all scripts
 #   5. environments/images.manifest.env — platform image keys derived from .env.example
 #   6. environments/*.config.env — config + secret keys derived from .env.example
-#   7. environments/production.manifest.env — RELEASE_VERSION present
+#   6b. environments/* — secret whitelist: no key from SECRET_KEYS may have a real value
+#   7. environments/production.manifest.env — RELEASE_VERSION present semver
 #
 # .env.example is the single source of truth for which variables must be defined.
 
@@ -211,6 +212,25 @@ check_config_file() {
 
 check_config_file "environments/staging.config.env"    "staging.config.env"
 check_config_file "environments/production.config.env" "production.config.env"
+
+# ── 6b. Secret whitelist — scan all environments/* for leaked secrets ─────────
+echo ""
+echo "Secret whitelist (environments/*):"
+
+leaked=0
+while IFS= read -r -d '' file; do
+  for key in "${SECRET_KEYS[@]}"; do
+    # Match KEY=<anything> where value is NOT SECRET_IN_GITHUB_ENV and NOT empty
+    if grep -qE "^${key}=.+" "$file" && ! grep -qE "^${key}=SECRET_IN_GITHUB_ENV$" "$file"; then
+      fail "$(basename "$file"): $key has a real value — must be SECRET_IN_GITHUB_ENV"
+      leaked=$((leaked + 1))
+    fi
+  done
+done < <(find environments/ -type f -name '*.env' -print0)
+
+if [[ "$leaked" -eq 0 ]]; then
+  pass "no secret keys with real values found in environments/"
+fi
 
 # ── 7. Production manifest preflight ─────────────────────────
 # Full semver + tag-collision validation is done in deploy-production.yml.
