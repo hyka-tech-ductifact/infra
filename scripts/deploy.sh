@@ -46,6 +46,7 @@ case "$ACTION" in
 esac
 
 ENV_FILE=".env.${ENV}"
+IMAGES_FILE="environments/images.manifest.env"
 
 # ── Navigate to infra directory ──────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -54,6 +55,11 @@ cd "$INFRA_DIR"
 
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "ERROR: $ENV_FILE not found. Copy from ${ENV_FILE}.example and fill in values."
+  exit 1
+fi
+
+if [[ ! -f "$IMAGES_FILE" ]]; then
+  echo "ERROR: $IMAGES_FILE not found."
   exit 1
 fi
 
@@ -102,6 +108,12 @@ else
   RELEASE_VERSION=$(grep -E '^RELEASE_VERSION=' "$ENV_FILE" | cut -d'=' -f2- || true)
 fi
 
+POSTGRES_IMAGE=$(grep -E '^POSTGRES_IMAGE=' "$IMAGES_FILE" | cut -d'=' -f2-)
+MINIO_IMAGE=$(grep -E '^MINIO_IMAGE=' "$IMAGES_FILE" | cut -d'=' -f2-)
+REDIS_IMAGE=$(grep -E '^REDIS_IMAGE=' "$IMAGES_FILE" | cut -d'=' -f2-)
+PROMETHEUS_IMAGE=$(grep -E '^PROMETHEUS_IMAGE=' "$IMAGES_FILE" | cut -d'=' -f2-)
+GRAFANA_IMAGE=$(grep -E '^GRAFANA_IMAGE=' "$IMAGES_FILE" | cut -d'=' -f2-)
+
 if [[ -z "$BACKEND_IMAGE" ]]; then
   echo "ERROR: BACKEND_IMAGE not defined"
   exit 1
@@ -110,10 +122,35 @@ if [[ -z "$FRONTEND_IMAGE" ]]; then
   echo "ERROR: FRONTEND_IMAGE not defined"
   exit 1
 fi
+if [[ -z "${POSTGRES_IMAGE:-}" ]]; then
+  echo "ERROR: POSTGRES_IMAGE not defined"
+  exit 1
+fi
+if [[ -z "${MINIO_IMAGE:-}" ]]; then
+  echo "ERROR: MINIO_IMAGE not defined"
+  exit 1
+fi
+if [[ -z "${REDIS_IMAGE:-}" ]]; then
+  echo "ERROR: REDIS_IMAGE not defined"
+  exit 1
+fi
+if [[ -z "${PROMETHEUS_IMAGE:-}" ]]; then
+  echo "ERROR: PROMETHEUS_IMAGE not defined"
+  exit 1
+fi
+if [[ -z "${GRAFANA_IMAGE:-}" ]]; then
+  echo "ERROR: GRAFANA_IMAGE not defined"
+  exit 1
+fi
 
 # Export so docker compose can use them (overrides .env.<env> values)
 export BACKEND_IMAGE
 export FRONTEND_IMAGE
+export POSTGRES_IMAGE
+export MINIO_IMAGE
+export REDIS_IMAGE
+export PROMETHEUS_IMAGE
+export GRAFANA_IMAGE
 export RELEASE_VERSION="${RELEASE_VERSION:-unknown}"
 
 echo "=== Deploying $ENV ==="

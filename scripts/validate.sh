@@ -165,6 +165,7 @@ echo ""
 echo "Production manifest:"
 
 PROD_MANIFEST="environments/production.manifest.env"
+IMAGES_MANIFEST="environments/images.manifest.env"
 if [[ ! -f "$PROD_MANIFEST" ]]; then
   fail "$PROD_MANIFEST not found"
 else
@@ -179,6 +180,22 @@ else
       fail "RELEASE_VERSION must match vX.Y.Z in $PROD_MANIFEST"
     fi
   fi
+
+fi
+
+echo ""
+echo "Shared images manifest:"
+
+if [[ ! -f "$IMAGES_MANIFEST" ]]; then
+  fail "$IMAGES_MANIFEST not found"
+else
+  for key in POSTGRES_IMAGE MINIO_IMAGE REDIS_IMAGE PROMETHEUS_IMAGE GRAFANA_IMAGE; do
+    if grep -qE "^${key}=.+" "$IMAGES_MANIFEST"; then
+      pass "${key} is present in $IMAGES_MANIFEST"
+    else
+      fail "${key} is missing in $IMAGES_MANIFEST"
+    fi
+  done
 fi
 
 # ── 8. Environment variables completeness ───────────────────
