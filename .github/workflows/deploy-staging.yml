@@ -12,7 +12,10 @@ concurrency:
 
 jobs:
   deploy:
+    environment: staging
     uses: ./.github/workflows/_deploy.yml
     with:
       environment: staging
+      env_file_name: .env.staging
+      config_file_path: environments/staging.config.env
     secrets: inherit

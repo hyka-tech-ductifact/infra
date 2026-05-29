@@ -13,9 +13,12 @@ concurrency:
 jobs:
   deploy:
     name: Deploy to Production
+    environment: production
     uses: ./.github/workflows/_deploy.yml
     with:
       environment: prod
+      env_file_name: .env.prod
+      config_file_path: environments/production.config.env
     secrets: inherit
 
   publish-release:

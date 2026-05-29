@@ -166,6 +166,8 @@ echo "Production manifest:"
 
 PROD_MANIFEST="environments/production.manifest.env"
 IMAGES_MANIFEST="environments/images.manifest.env"
+STAGING_CONFIG="environments/staging.config.env"
+PRODUCTION_CONFIG="environments/production.config.env"
 if [[ ! -f "$PROD_MANIFEST" ]]; then
   fail "$PROD_MANIFEST not found"
 else
@@ -198,12 +200,84 @@ else
   done
 fi
 
+echo ""
+echo "Runtime config manifests:"
+
+validate_config_file() {
+  local file="$1"
+  local label="$2"
+  shift 2
+  local expected_keys=("$@")
+
+  if [[ ! -f "$file" ]]; then
+    fail "$file not found"
+    return
+  fi
+
+  for key in "${expected_keys[@]}"; do
+    if grep -qE "^${key}=.+" "$file"; then
+      pass "${label}: ${key} is present"
+    else
+      fail "${label}: ${key} is missing in $file"
+    fi
+  done
+
+  for secret_key in DB_PASSWORD JWT_SECRET MINIO_ROOT_USER MINIO_ROOT_PASSWORD SMTP_USERNAME SMTP_PASSWORD REDIS_PASSWORD; do
+    if grep -qE "^${secret_key}=SECRET_IN_GITHUB_ENV$" "$file"; then
+      pass "${label}: ${secret_key} placeholder is explicit"
+    elif grep -qE "^${secret_key}=" "$file"; then
+      fail "${label}: ${secret_key} must use SECRET_IN_GITHUB_ENV placeholder in $file"
+    else
+      fail "${label}: ${secret_key} placeholder is missing in $file"
+    fi
+  done
+}
+
+COMMON_CONFIG_KEYS=(
+  FRONTEND_PORT
+  DB_USER
+  DB_NAME
+  BACKEND_HOST
+  BACKEND_PORT
+  JWT_TOKEN_DURATION
+  JWT_REFRESH_TOKEN_DURATION
+  CORS_ORIGINS
+  LOG_LEVEL
+  LOG_FORMAT
+  GIN_MODE
+  RATE_LIMIT_IP_MAX
+  RATE_LIMIT_IP_WINDOW
+  RATE_LIMIT_USER_MAX
+  RATE_LIMIT_USER_WINDOW
+  LOGIN_THROTTLE_MAX_ATTEMPTS
+  LOGIN_THROTTLE_WINDOW
+  LOGIN_THROTTLE_LOCKOUT
+  MINIO_BUCKET
+  MINIO_CONSOLE_PORT
+  SMTP_HOST
+  SMTP_PORT
+  SMTP_AUTH
+  SMTP_FROM
+  REDIS_HOST
+  REDIS_PORT
+  REDIS_AUTH
+  REDIS_DB
+  GRAFANA_PORT
+  PROMETHEUS_RETENTION
+  VERIFICATION_BASE_URL
+  VERIFICATION_EMAIL_TOKEN_TTL
+  VERIFICATION_PASSWORD_RESET_TOKEN_TTL
+)
+
+validate_config_file "$STAGING_CONFIG" "staging.config.env" ENV "${COMMON_CONFIG_KEYS[@]}"
+validate_config_file "$PRODUCTION_CONFIG" "production.config.env" ENV "${COMMON_CONFIG_KEYS[@]}"
+
 # ── 8. Environment variables completeness ───────────────────
 if [[ -n "$TARGET_ENV" ]]; then
   echo ""
   echo "Environment variables ($TARGET_ENV):"
 
-  EXAMPLE_FILE=".env.${TARGET_ENV}.example"
+  EXAMPLE_FILE=".env.example"
   ACTUAL_FILE=".env.${TARGET_ENV}"
 
   if [[ ! -f "$EXAMPLE_FILE" ]]; then

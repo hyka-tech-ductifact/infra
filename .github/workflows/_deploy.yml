@@ -7,6 +7,14 @@ on:
         description: "Deploy environment"
         required: true
         type: string
+      env_file_name:
+        description: "Target env filename on server (example: .env.staging)"
+        required: true
+        type: string
+      config_file_path:
+        description: "Repository path to non-sensitive env config file"
+        required: true
+        type: string
     secrets:
       VPS_SSH_KEY:
         required: true
@@ -17,6 +25,20 @@ on:
       VPS_USER:
         required: true
       VPS_HOST:
+        required: true
+      DB_PASSWORD:
+        required: true
+      JWT_SECRET:
+        required: true
+      MINIO_ROOT_USER:
+        required: true
+      MINIO_ROOT_PASSWORD:
+        required: true
+      SMTP_USERNAME:
+        required: true
+      SMTP_PASSWORD:
+        required: true
+      REDIS_PASSWORD:
         required: true
 
 jobs:
@@ -37,9 +59,38 @@ jobs:
 
       - name: Deploy to server
         run: |
+          set -euo pipefail
+
           mkdir -p ~/.ssh
           echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
+
+          CONFIG_FILE="${{ inputs.config_file_path }}"
+          ENV_TMP_FILE="/tmp/${{ inputs.env_file_name }}"
+
+          if [[ ! -f "$CONFIG_FILE" ]]; then
+            echo "ERROR: config file '$CONFIG_FILE' not found"
+            exit 1
+          fi
+
+          cp "$CONFIG_FILE" "$ENV_TMP_FILE"
+
+          sed -i "s|^DB_PASSWORD=.*|DB_PASSWORD=${{ secrets.DB_PASSWORD }}|" "$ENV_TMP_FILE"
+          sed -i "s|^JWT_SECRET=.*|JWT_SECRET=${{ secrets.JWT_SECRET }}|" "$ENV_TMP_FILE"
+          sed -i "s|^MINIO_ROOT_USER=.*|MINIO_ROOT_USER=${{ secrets.MINIO_ROOT_USER }}|" "$ENV_TMP_FILE"
+          sed -i "s|^MINIO_ROOT_PASSWORD=.*|MINIO_ROOT_PASSWORD=${{ secrets.MINIO_ROOT_PASSWORD }}|" "$ENV_TMP_FILE"
+          sed -i "s|^SMTP_USERNAME=.*|SMTP_USERNAME=${{ secrets.SMTP_USERNAME }}|" "$ENV_TMP_FILE"
+          sed -i "s|^SMTP_PASSWORD=.*|SMTP_PASSWORD=${{ secrets.SMTP_PASSWORD }}|" "$ENV_TMP_FILE"
+          sed -i "s|^REDIS_PASSWORD=.*|REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}|" "$ENV_TMP_FILE"
+
+          chmod 600 "$ENV_TMP_FILE"
+
+          scp -o StrictHostKeyChecking=no \
+              -o UserKnownHostsFile=/dev/null \
+              -o "ProxyCommand=cloudflared access ssh --hostname %h --id ${{ secrets.CF_ACCESS_CLIENT_ID }} --secret ${{ secrets.CF_ACCESS_CLIENT_SECRET }}" \
+              -i ~/.ssh/deploy_key \
+              "$ENV_TMP_FILE" \
+              ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:~/ductifact/infra/${{ inputs.env_file_name }}
 
           ssh -o StrictHostKeyChecking=no \
               -o UserKnownHostsFile=/dev/null \
@@ -47,3 +98,5 @@ jobs:
               -i ~/.ssh/deploy_key \
               ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
               "cd ~/ductifact/infra && git pull --ff-only origin main && ./scripts/deploy.sh ${{ inputs.environment }}"
+
+          rm -f "$ENV_TMP_FILE"
