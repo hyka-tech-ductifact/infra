@@ -4,19 +4,21 @@
 # Intended to run inside GitHub Actions.
 #
 # Usage:
-#   ./scripts/sync_remote_and_trigger_deploy.sh <environment> <env-file-name> <config-file> <app-manifest-file>
+#   ./scripts/sync_remote_and_trigger_deploy.sh <environment>
+#
+#   environment: staging | production
 
 set -euo pipefail
 
 ENVIRONMENT="${1:-}"
-ENV_FILE_NAME="${2:-}"
-CONFIG_FILE="${3:-}"
-APP_MANIFEST_FILE="${4:-}"
 SHARED_IMAGES_FILE="environments/images.manifest.env"
-ENV_TMP_FILE="/tmp/${ENV_FILE_NAME}"
+ENV_FILE_NAME=""
+CONFIG_FILE=""
+APP_MANIFEST_FILE=""
+ENV_TMP_FILE=""
 
 usage() {
-	echo "Usage: $0 <environment> <env-file-name> <config-file> <app-manifest-file>"
+	echo "Usage: $0 <staging|production>"
 	exit 1
 }
 
@@ -28,9 +30,28 @@ require_env_var() {
 	fi
 }
 
-if [[ -z "$ENVIRONMENT" || -z "$ENV_FILE_NAME" || -z "$CONFIG_FILE" || -z "$APP_MANIFEST_FILE" ]]; then
+if [[ -z "$ENVIRONMENT" ]]; then
 	usage
 fi
+
+case "$ENVIRONMENT" in
+	staging)
+		ENV_FILE_NAME=".env.staging"
+		CONFIG_FILE="environments/staging.config.env"
+		APP_MANIFEST_FILE="environments/staging.manifest.env"
+		;;
+	production)
+		ENV_FILE_NAME=".env.production"
+		CONFIG_FILE="environments/production.config.env"
+		APP_MANIFEST_FILE="environments/production.manifest.env"
+		;;
+	*)
+		echo "ERROR: unknown environment '$ENVIRONMENT'. Use 'staging' or 'production'."
+		exit 1
+		;;
+esac
+
+ENV_TMP_FILE="/tmp/${ENV_FILE_NAME}"
 
 for key in \
 	VPS_SSH_KEY \

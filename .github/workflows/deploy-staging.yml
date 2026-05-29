@@ -34,4 +34,4 @@ jobs:
           SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
-        run: ./scripts/sync_remote_and_trigger_deploy.sh staging .env.staging environments/staging.config.env environments/staging.manifest.env
+        run: ./scripts/sync_remote_and_trigger_deploy.sh staging
