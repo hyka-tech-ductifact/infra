@@ -11,8 +11,12 @@ on:
         description: "Target env filename on server (example: .env.staging)"
         required: true
         type: string
+      app_manifest_file_path:
+        description: "Repository path to app image manifest file"
+        required: true
+        type: string
       config_file_path:
-        description: "Repository path to non-sensitive env config file"
+        description: "Repository path to environment config file"
         required: true
         type: string
     secrets:
@@ -66,6 +70,8 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
 
           CONFIG_FILE="${{ inputs.config_file_path }}"
+          APP_MANIFEST_FILE="${{ inputs.app_manifest_file_path }}"
+          SHARED_IMAGES_FILE="environments/images.manifest.env"
           ENV_TMP_FILE="/tmp/${{ inputs.env_file_name }}"
 
           if [[ ! -f "$CONFIG_FILE" ]]; then
@@ -73,7 +79,20 @@ jobs:
             exit 1
           fi
 
+          if [[ ! -f "$APP_MANIFEST_FILE" ]]; then
+            echo "ERROR: app manifest file '$APP_MANIFEST_FILE' not found"
+            exit 1
+          fi
+
+          if [[ ! -f "$SHARED_IMAGES_FILE" ]]; then
+            echo "ERROR: shared images file '$SHARED_IMAGES_FILE' not found"
+            exit 1
+          fi
+
           cp "$CONFIG_FILE" "$ENV_TMP_FILE"
+
+          cat "$APP_MANIFEST_FILE" >> "$ENV_TMP_FILE"
+          cat "$SHARED_IMAGES_FILE" >> "$ENV_TMP_FILE"
 
           sed -i "s|^DB_PASSWORD=.*|DB_PASSWORD=${{ secrets.DB_PASSWORD }}|" "$ENV_TMP_FILE"
           sed -i "s|^JWT_SECRET=.*|JWT_SECRET=${{ secrets.JWT_SECRET }}|" "$ENV_TMP_FILE"

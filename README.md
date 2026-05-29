@@ -18,7 +18,6 @@ This repo is cloned on the server (`~/ductifact/infra/`) and contains everything
 │   └── _deploy.yml              # Shared deploy workflow (SSH + env sync + deploy script)
 ├── docker-compose.yml           # Production/staging compose (single source of truth)
 ├── environments/
-│   ├── local.manifest.env       # Local manifest (image versions)
 │   ├── production.manifest.env  # 🎯 Production manifest (image versions)
 │   ├── production.config.env    # Production runtime config + explicit secret placeholders
 │   ├── staging.manifest.env     # Staging manifest (image versions)
@@ -33,7 +32,7 @@ This repo is cloned on the server (`~/ductifact/infra/`) and contains everything
 │       ├── provisioning/
 │       └── dashboards/
 └── scripts/
-    ├── deploy.sh                # Deploy script (reads manifest + .env for config)
+    ├── deploy.sh                # Deploy script (reads only .env.<env>)
     ├── smoke.sh                 # Post-deploy health checks
     └── validate.sh              # Pre-deploy validation
 ```
@@ -48,7 +47,7 @@ This repo is cloned on the server (`~/ductifact/infra/`) and contains everything
 │   → propose-staging.yml opens PR updating staging.manifest.env    │
 │   → CI ✅ + auto-merge                                             │
 │   → deploy-staging.yml                                             │
-│   → _deploy.yml builds .env.staging from config + secrets         │
+│   → _deploy.yml builds .env.staging from environments/* + secrets │
 │   → SSH to server → deploy.sh staging                             │
 └──────────────────────────────────────────────────────────────────┘
 
@@ -60,7 +59,7 @@ This repo is cloned on the server (`~/ductifact/infra/`) and contains everything
 │ 3. Workflow opens PR bumping RELEASE_VERSION + prod images        │
 │ 4. Human reviews + approves + merges                              │
 │ 5. deploy-production.yml triggers                                 │
-│ 6. _deploy.yml builds .env.prod from config + secrets             │
+│ 6. _deploy.yml builds .env.prod from environments/* + secrets     │
 │ 7. SSH to server → deploy.sh prod                                 │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -107,8 +106,11 @@ cd ~/ductifact/infra
 
 # 2. Optional local bootstrap: use the single template as reference
 cp .env.example .env.local
-# CI-driven deploys build .env from config files in environments/ + GitHub Environment secrets
-# Sensitive keys stay in the config file with the explicit placeholder SECRET_IN_GITHUB_ENV
+# Set local images in .env.local (required for local deploy)
+# BACKEND_IMAGE=backend-app
+# FRONTEND_IMAGE=frontend-app
+# CI-driven deploys build .env.staging/.env.prod from environments/* + GitHub Environment secrets
+# deploy.sh never generates .env files; it only consumes .env.local/.env.staging/.env.prod
 
 # 3. Log in to ghcr.io
 echo "YOUR_GITHUB_TOKEN" | docker login ghcr.io -u YOUR_USER --password-stdin
@@ -140,8 +142,9 @@ echo "YOUR_GITHUB_TOKEN" | docker login ghcr.io -u YOUR_USER --password-stdin
 
 - `.env.prod`, `.env.staging`, and `.env.local` are **runtime files only** and are **never committed**.
 - `.env.example` is the single reference template for all variables.
-- `environments/*.config.env` **are committed** — they contain runtime config and explicit placeholders (`SECRET_IN_GITHUB_ENV`) for sensitive keys.
-- `environments/production.manifest.env` **is committed** — it only contains image references + `RELEASE_VERSION`, no secrets.
+- `deploy.sh` reads only `.env.<env>` and treats it as the only runtime source of truth.
+- `environments/*.config.env` and `environments/*manifest.env` are **auxiliary build inputs** used to construct final `.env` files.
+- Sensitive values are never committed; placeholders in config (`SECRET_IN_GITHUB_ENV`) are replaced in CI.
 - Staging and production use **different credentials** (DB, JWT).
 - Ports are only exposed on `127.0.0.1` — Caddy (host-level) handles reverse proxying.
 - Full CD guide available at `backend/docs/GUIDE_CD.md`.
@@ -151,7 +154,8 @@ echo "YOUR_GITHUB_TOKEN" | docker login ghcr.io -u YOUR_USER --password-stdin
 
 - `docker-compose.yml` is the runtime source of truth for infrastructure services (`postgres`, `redis`, `minio`, `prometheus`, `grafana`).
 - External images should be pinned with immutable references (`tag@sha256:digest` or `@sha256:digest`) to avoid drift.
-- `environments/*.manifest.env` controls only app promotions (`BACKEND_IMAGE`, `FRONTEND_IMAGE`) and should use immutable `sha-*` tags.
+- `environments/{staging,production}.manifest.env` controls app promotions (`BACKEND_IMAGE`, `FRONTEND_IMAGE`) and should use immutable `sha-*` tags.
+- Local uses `.env.local` for `BACKEND_IMAGE` and `FRONTEND_IMAGE`.
 - Update flow: bump in staging first, validate smoke checks, then promote to production via PR.
 
 ## Contributing

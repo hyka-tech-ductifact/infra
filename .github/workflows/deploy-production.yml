@@ -18,6 +18,7 @@ jobs:
     with:
       environment: prod
       env_file_name: .env.prod
+      app_manifest_file_path: environments/production.manifest.env
       config_file_path: environments/production.config.env
     secrets: inherit
 

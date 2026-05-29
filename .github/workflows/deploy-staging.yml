@@ -17,5 +17,6 @@ jobs:
     with:
       environment: staging
       env_file_name: .env.staging
+      app_manifest_file_path: environments/staging.manifest.env
       config_file_path: environments/staging.config.env
     secrets: inherit
