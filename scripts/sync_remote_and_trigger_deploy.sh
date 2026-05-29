@@ -87,9 +87,14 @@ mkdir -p ~/.ssh
 printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
 chmod 600 ~/.ssh/deploy_key
 
-cp "$CONFIG_FILE" "$ENV_TMP_FILE"
-cat "$APP_MANIFEST_FILE" >> "$ENV_TMP_FILE"
-cat "$SHARED_IMAGES_FILE" >> "$ENV_TMP_FILE"
+{
+	cat "$CONFIG_FILE"
+	printf '\n'
+	cat "$APP_MANIFEST_FILE"
+	printf '\n'
+	cat "$SHARED_IMAGES_FILE"
+	printf '\n'
+} > "$ENV_TMP_FILE"
 
 sed -i "s|^DB_PASSWORD=.*|DB_PASSWORD=${DB_PASSWORD}|" "$ENV_TMP_FILE"
 sed -i "s|^JWT_SECRET=.*|JWT_SECRET=${JWT_SECRET}|" "$ENV_TMP_FILE"
@@ -98,6 +103,13 @@ sed -i "s|^MINIO_ROOT_PASSWORD=.*|MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}|" "
 sed -i "s|^SMTP_USERNAME=.*|SMTP_USERNAME=${SMTP_USERNAME}|" "$ENV_TMP_FILE"
 sed -i "s|^SMTP_PASSWORD=.*|SMTP_PASSWORD=${SMTP_PASSWORD}|" "$ENV_TMP_FILE"
 sed -i "s|^REDIS_PASSWORD=.*|REDIS_PASSWORD=${REDIS_PASSWORD}|" "$ENV_TMP_FILE"
+
+INVALID_ENV_LINES=$(grep -nEv '^\s*$|^\s*#|^[A-Za-z_][A-Za-z0-9_]*=.*$' "$ENV_TMP_FILE" || true)
+if [[ -n "$INVALID_ENV_LINES" ]]; then
+	echo "ERROR: generated ${ENV_FILE_NAME} has invalid lines:"
+	echo "$INVALID_ENV_LINES"
+	exit 1
+fi
 
 chmod 600 "$ENV_TMP_FILE"
 

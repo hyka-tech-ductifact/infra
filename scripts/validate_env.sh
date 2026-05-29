@@ -62,6 +62,12 @@ if [[ ! -f "$ACTUAL_FILE" ]]; then
   exit 1
 fi
 
+invalid_lines=$(grep -nEv '^\s*$|^\s*#|^[A-Za-z_][A-Za-z0-9_]*=.*$' "$ACTUAL_FILE" || true)
+if [[ -n "$invalid_lines" ]]; then
+  fail "Invalid lines in $ACTUAL_FILE (must be comments, blank lines, or KEY=VALUE)"
+  echo "$invalid_lines"
+fi
+
 missing_vars=()
 empty_vars=()
 
