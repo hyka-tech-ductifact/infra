@@ -12,11 +12,26 @@ concurrency:
 
 jobs:
   deploy:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
     environment: staging
-    uses: ./.github/workflows/_deploy.yml
-    with:
-      environment: staging
-      env_file_name: .env.staging
-      app_manifest_file_path: environments/staging.manifest.env
-      config_file_path: environments/staging.config.env
-    secrets: inherit
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to server
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          MINIO_ROOT_USER: ${{ secrets.MINIO_ROOT_USER }}
+          MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+        run: ./scripts/deploy_remote.sh staging .env.staging environments/staging.config.env environments/staging.manifest.env
