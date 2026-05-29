@@ -10,7 +10,8 @@
 #   4. Grafana dashboard JSON
 #   5. Grafana provisioning YAML
 #   6. ShellCheck on all scripts
-#   7. Environment variables completeness (when <environment> is given)
+#   7. Production release version format in manifest
+#   8. Environment variables completeness (when <environment> is given)
 #
 # Usage:
 #   ./scripts/validate.sh                    # validate configs only
@@ -159,7 +160,28 @@ else
   done
 fi
 
-# ── 7. Environment variables completeness ───────────────────
+# ── 7. Production release version in manifest ───────────────
+echo ""
+echo "Production manifest:"
+
+PROD_MANIFEST="environments/production.manifest.env"
+if [[ ! -f "$PROD_MANIFEST" ]]; then
+  fail "$PROD_MANIFEST not found"
+else
+  RELEASE_VERSION_LINE=$(grep -E '^RELEASE_VERSION=' "$PROD_MANIFEST" || true)
+  if [[ -z "$RELEASE_VERSION_LINE" ]]; then
+    fail "RELEASE_VERSION is missing in $PROD_MANIFEST"
+  else
+    RELEASE_VERSION="${RELEASE_VERSION_LINE#*=}"
+    if [[ "$RELEASE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      pass "RELEASE_VERSION format is valid ($RELEASE_VERSION)"
+    else
+      fail "RELEASE_VERSION must match vX.Y.Z in $PROD_MANIFEST"
+    fi
+  fi
+fi
+
+# ── 8. Environment variables completeness ───────────────────
 if [[ -n "$TARGET_ENV" ]]; then
   echo ""
   echo "Environment variables ($TARGET_ENV):"

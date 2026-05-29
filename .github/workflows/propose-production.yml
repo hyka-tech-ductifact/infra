@@ -1,0 +1,94 @@
+name: Propose Production Promotion
+
+on:
+  workflow_dispatch:
+
+jobs:
+  propose-production-update:
+    name: Propose Production Manifest Update
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Promote staging images and bump release version
+        id: promote
+        run: |
+          set -euo pipefail
+
+          STAGING_MANIFEST="environments/staging.manifest.env"
+          PROD_MANIFEST="environments/production.manifest.env"
+
+          if [[ ! -f "$STAGING_MANIFEST" ]]; then
+            echo "ERROR: $STAGING_MANIFEST not found"
+            exit 1
+          fi
+
+          if [[ ! -f "$PROD_MANIFEST" ]]; then
+            echo "ERROR: $PROD_MANIFEST not found"
+            exit 1
+          fi
+
+          STAGING_BACKEND_IMAGE=$(grep -E '^BACKEND_IMAGE=' "$STAGING_MANIFEST" | cut -d'=' -f2-)
+          STAGING_FRONTEND_IMAGE=$(grep -E '^FRONTEND_IMAGE=' "$STAGING_MANIFEST" | cut -d'=' -f2-)
+
+          if [[ -z "$STAGING_BACKEND_IMAGE" || -z "$STAGING_FRONTEND_IMAGE" ]]; then
+            echo "ERROR: staging manifest images are missing"
+            exit 1
+          fi
+
+          CURRENT_RELEASE_VERSION=$(grep -E '^RELEASE_VERSION=' "$PROD_MANIFEST" | cut -d'=' -f2- || true)
+          CURRENT_RELEASE_VERSION="${CURRENT_RELEASE_VERSION:-v0.0.0}"
+
+          if [[ ! "$CURRENT_RELEASE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "ERROR: invalid RELEASE_VERSION in production manifest: $CURRENT_RELEASE_VERSION"
+            exit 1
+          fi
+
+          BASE="${CURRENT_RELEASE_VERSION#v}"
+          IFS='.' read -r major minor patch <<< "$BASE"
+          patch=$((patch + 1))
+          NEXT_RELEASE_VERSION="v${major}.${minor}.${patch}"
+
+          sed -i "s|^BACKEND_IMAGE=.*|BACKEND_IMAGE=${STAGING_BACKEND_IMAGE}|" "$PROD_MANIFEST"
+          sed -i "s|^FRONTEND_IMAGE=.*|FRONTEND_IMAGE=${STAGING_FRONTEND_IMAGE}|" "$PROD_MANIFEST"
+
+          if grep -qE '^RELEASE_VERSION=' "$PROD_MANIFEST"; then
+            sed -i "s|^RELEASE_VERSION=.*|RELEASE_VERSION=${NEXT_RELEASE_VERSION}|" "$PROD_MANIFEST"
+          else
+            echo "RELEASE_VERSION=${NEXT_RELEASE_VERSION}" >> "$PROD_MANIFEST"
+          fi
+
+          echo "release_version=${NEXT_RELEASE_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "backend_image=${STAGING_BACKEND_IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "frontend_image=${STAGING_FRONTEND_IMAGE}" >> "$GITHUB_OUTPUT"
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.INFRA_PAT }}
+          commit-message: "production: promote staging images (${{ steps.promote.outputs.release_version }})"
+          branch: "deploy/production/${{ steps.promote.outputs.release_version }}"
+          delete-branch: true
+          title: "🚀 Promote staging to production (${{ steps.promote.outputs.release_version }})"
+          body: |
+            ## Production Promotion Proposal
+
+            This PR copies image versions from `environments/staging.manifest.env`
+            into `environments/production.manifest.env` and bumps `RELEASE_VERSION`.
+
+            | Field | Value |
+            |-------|-------|
+            | Backend image | `${{ steps.promote.outputs.backend_image }}` |
+            | Frontend image | `${{ steps.promote.outputs.frontend_image }}` |
+            | Next release | `${{ steps.promote.outputs.release_version }}` |
+
+            Merge this PR manually to trigger production deploy via `deploy-production.yml`.
+          labels: |
+            production
+            automated

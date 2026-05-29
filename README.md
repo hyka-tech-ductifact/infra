@@ -78,6 +78,7 @@ git push origin promote/release-2026-05-20
 - Default behavior (push trigger): auto-bump patch version (`vX.Y.Z` → `vX.Y.(Z+1)`).
 - Manual deploy (`workflow_dispatch`): you can provide `version` (example: `v0.5.0`).
 - Release notes include deployed backend/frontend image refs from `environments/production.manifest.env`.
+- `environments/production.manifest.env` also includes `RELEASE_VERSION` (manually maintained) and is injected into backend runtime for `/readyz`.
 
 ### Rollback
 

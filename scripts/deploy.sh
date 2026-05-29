@@ -94,10 +94,12 @@ if [[ -f "$MANIFEST_FILE" ]]; then
   echo "Reading image versions from manifest: $MANIFEST_FILE"
   BACKEND_IMAGE=$(grep -E '^BACKEND_IMAGE=' "$MANIFEST_FILE" | cut -d'=' -f2-)
   FRONTEND_IMAGE=$(grep -E '^FRONTEND_IMAGE=' "$MANIFEST_FILE" | cut -d'=' -f2-)
+  RELEASE_VERSION=$(grep -E '^RELEASE_VERSION=' "$MANIFEST_FILE" | cut -d'=' -f2- || true)
 else
   echo "No manifest found at $MANIFEST_FILE, reading from $ENV_FILE"
   BACKEND_IMAGE=$(grep -E '^BACKEND_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
   FRONTEND_IMAGE=$(grep -E '^FRONTEND_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
+  RELEASE_VERSION=$(grep -E '^RELEASE_VERSION=' "$ENV_FILE" | cut -d'=' -f2- || true)
 fi
 
 if [[ -z "$BACKEND_IMAGE" ]]; then
@@ -112,10 +114,12 @@ fi
 # Export so docker compose can use them (overrides .env.<env> values)
 export BACKEND_IMAGE
 export FRONTEND_IMAGE
+export RELEASE_VERSION="${RELEASE_VERSION:-unknown}"
 
 echo "=== Deploying $ENV ==="
 echo "Backend:   $BACKEND_IMAGE"
 echo "Frontend:  $FRONTEND_IMAGE"
+echo "Release:   $RELEASE_VERSION"
 echo "Manifest:  ${MANIFEST_FILE:-none}"
 echo "Env file:  $ENV_FILE"
 echo "Directory: $INFRA_DIR"
