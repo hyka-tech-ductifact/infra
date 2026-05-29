@@ -9,9 +9,11 @@
 #   2. Prometheus config + alert rules
 #   3. Grafana dashboards (JSON) + provisioning (YAML)
 #   4. ShellCheck on all scripts
-#   5. environments/images.manifest.env — all shared images present
-#   6. environments/*.config.env — required keys + SECRET_IN_GITHUB_ENV placeholders
+#   5. environments/images.manifest.env — platform image keys derived from .env.example
+#   6. environments/*.config.env — config + secret keys derived from .env.example
 #   7. environments/production.manifest.env — RELEASE_VERSION present
+#
+# .env.example is the single source of truth for which variables must be defined.
 
 set -euo pipefail
 
@@ -126,6 +128,29 @@ else
   done
 fi
 
+# ── Derive key sets from .env.example (single source of truth) ───────────────
+EXAMPLE_FILE=".env.example"
+
+if [[ ! -f "$EXAMPLE_FILE" ]]; then
+  echo "ERROR: $EXAMPLE_FILE not found — cannot derive expected keys."
+  exit 1
+fi
+
+# Keys whose value in .env.example is SECRET_IN_GITHUB_ENV
+mapfile -t SECRET_KEYS < <(grep -E '^[A-Z_]+=SECRET_IN_GITHUB_ENV$' "$EXAMPLE_FILE" | cut -d= -f1)
+
+# Platform image keys: *_IMAGE entries that are NOT local-only (BACKEND_IMAGE, FRONTEND_IMAGE)
+LOCAL_ONLY_IMAGE_KEYS=(BACKEND_IMAGE FRONTEND_IMAGE)
+mapfile -t PLATFORM_IMAGE_KEYS < <(
+  grep -E '^[A-Z_]+_IMAGE=' "$EXAMPLE_FILE" | cut -d= -f1 | grep -vFf <(printf '%s\n' "${LOCAL_ONLY_IMAGE_KEYS[@]}")
+)
+
+# Config keys: all non-comment keys that are not secrets, not images (platform or local-only)
+ALL_EXCLUDE_KEYS=("${SECRET_KEYS[@]}" "${LOCAL_ONLY_IMAGE_KEYS[@]}" "${PLATFORM_IMAGE_KEYS[@]}")
+mapfile -t CONFIG_KEYS < <(
+  grep -E '^[A-Z_]+=' "$EXAMPLE_FILE" | cut -d= -f1 | grep -vFf <(printf '%s\n' "${ALL_EXCLUDE_KEYS[@]}")
+)
+
 # ── 5. Shared images manifest ─────────────────────────────────
 echo ""
 echo "Shared images manifest (environments/images.manifest.env):"
@@ -134,36 +159,26 @@ IMAGES_MANIFEST="environments/images.manifest.env"
 if [[ ! -f "$IMAGES_MANIFEST" ]]; then
   fail "$IMAGES_MANIFEST not found"
 else
-  for key in POSTGRES_IMAGE MINIO_IMAGE REDIS_IMAGE PROMETHEUS_IMAGE GRAFANA_IMAGE; do
-    if grep -qE "^${key}=.+" "$IMAGES_MANIFEST"; then
-      pass "${key} is present"
-    else
+  images_failures=0
+  for key in "${PLATFORM_IMAGE_KEYS[@]}"; do
+    if ! grep -qE "^${key}=.+" "$IMAGES_MANIFEST"; then
       fail "${key} is missing in $IMAGES_MANIFEST"
+      images_failures=$((images_failures + 1))
     fi
   done
+  if [[ "$images_failures" -eq 0 ]]; then
+    pass "all platform image keys present"
+  fi
 fi
 
 # ── 6. Runtime config manifests ───────────────────────────────
 echo ""
 echo "Runtime config manifests (environments/*.config.env):"
 
-SECRET_KEYS=(DB_PASSWORD JWT_SECRET MINIO_ROOT_USER MINIO_ROOT_PASSWORD SMTP_USERNAME SMTP_PASSWORD REDIS_PASSWORD)
-CONFIG_KEYS=(
-  ENV FRONTEND_PORT DB_USER DB_NAME BACKEND_HOST BACKEND_PORT
-  JWT_TOKEN_DURATION JWT_REFRESH_TOKEN_DURATION CORS_ORIGINS
-  LOG_LEVEL LOG_FORMAT GIN_MODE
-  RATE_LIMIT_IP_MAX RATE_LIMIT_IP_WINDOW RATE_LIMIT_USER_MAX RATE_LIMIT_USER_WINDOW
-  LOGIN_THROTTLE_MAX_ATTEMPTS LOGIN_THROTTLE_WINDOW LOGIN_THROTTLE_LOCKOUT
-  MINIO_BUCKET MINIO_CONSOLE_PORT
-  SMTP_HOST SMTP_PORT SMTP_AUTH SMTP_FROM
-  REDIS_HOST REDIS_PORT REDIS_AUTH REDIS_DB
-  GRAFANA_PORT PROMETHEUS_RETENTION
-  VERIFICATION_BASE_URL VERIFICATION_EMAIL_TOKEN_TTL VERIFICATION_PASSWORD_RESET_TOKEN_TTL
-)
-
 check_config_file() {
   local file="$1"
   local label="$2"
+  local local_failures=0
 
   if [[ ! -f "$file" ]]; then
     fail "$label: $file not found"
@@ -171,22 +186,27 @@ check_config_file() {
   fi
 
   for key in "${CONFIG_KEYS[@]}"; do
-    if grep -qE "^${key}=.+" "$file"; then
-      pass "$label: $key is present"
-    else
+    if ! grep -qE "^${key}=.+" "$file"; then
       fail "$label: $key is missing"
+      local_failures=$((local_failures + 1))
     fi
   done
 
   for key in "${SECRET_KEYS[@]}"; do
     if grep -qE "^${key}=SECRET_IN_GITHUB_ENV$" "$file"; then
-      pass "$label: $key placeholder is explicit"
+      : # ok
     elif grep -qE "^${key}=" "$file"; then
       fail "$label: $key must be SECRET_IN_GITHUB_ENV (not a real value)"
+      local_failures=$((local_failures + 1))
     else
       fail "$label: $key placeholder is missing"
+      local_failures=$((local_failures + 1))
     fi
   done
+
+  if [[ "$local_failures" -eq 0 ]]; then
+    pass "$label: all keys present and valid"
+  fi
 }
 
 check_config_file "environments/staging.config.env"    "staging.config.env"
@@ -205,7 +225,12 @@ else
   if [[ -z "$release_version_line" ]]; then
     fail "RELEASE_VERSION is missing"
   else
-    pass "RELEASE_VERSION is present (${release_version_line#*=})"
+    version="${release_version_line#*=}"
+    if [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._-]+)?(\+[a-zA-Z0-9._-]+)?$ ]]; then
+      pass "RELEASE_VERSION is valid semver ($version)"
+    else
+      fail "RELEASE_VERSION is not valid semver: '$version' (expected vMAJOR.MINOR.PATCH)"
+    fi
   fi
 fi
 
