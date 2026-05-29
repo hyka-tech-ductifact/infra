@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# deploy_remote.sh — Build a runtime env file, copy it to the VPS, and trigger deploy.sh.
+# sync_remote_and_trigger_deploy.sh — Build a runtime env file, copy it to the VPS, and trigger deploy.sh.
 #
 # Intended to run inside GitHub Actions.
 #
 # Usage:
-#   ./scripts/deploy_remote.sh <environment> <env-file-name> <config-file> <app-manifest-file>
+#   ./scripts/sync_remote_and_trigger_deploy.sh <environment> <env-file-name> <config-file> <app-manifest-file>
 
 set -euo pipefail
 
