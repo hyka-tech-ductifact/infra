@@ -9,18 +9,19 @@
 #   restore  <env> [backup_file]   Restore a backup (latest if omitted)
 #   list     <env>                 List available backups
 #
-# Environments: local | staging | prod
+# Environments: local | staging | production
+# Alias: prod -> production
 #
 # Examples:
-#   ./scripts/db.sh backup  prod
+#   ./scripts/db.sh backup  production
 #   ./scripts/db.sh restore staging
 #   ./scripts/db.sh restore staging ~/backups/ductifact/staging/20260412_030000.sql.gz
-#   ./scripts/db.sh list    prod
+#   ./scripts/db.sh list    production
 #
 # Cron setup (daily at 3:00 AM):
 # crontab -e (to edit)
 # crontab -l (to list)
-#   0 3 * * * cd ~/ductifact/infra && ./scripts/db.sh backup prod >> ~/backups/ductifact/backup.log 2>&1
+#   0 3 * * * cd ~/ductifact/infra && ./scripts/db.sh backup production >> ~/backups/ductifact/backup.log 2>&1
 
 set -euo pipefail
 
@@ -35,15 +36,16 @@ usage() {
   echo "  restore  <env> [backup_file]  Restore a backup (latest if omitted)"
   echo "  list     <env>                List available backups"
   echo ""
-  echo "Environments: local | staging | prod"
+  echo "Environments: local | staging | production"
   exit 1
 }
 
 validate_env() {
   case "$1" in
-    local|staging|prod) ;;
+    prod) ENV="production" ;;
+    local|staging|production) ;;
     *)
-      echo "ERROR: unknown environment '$1'. Use 'local', 'staging', or 'prod'."
+      echo "ERROR: unknown environment '$1'. Use 'local', 'staging', or 'production'."
       exit 1
       ;;
   esac

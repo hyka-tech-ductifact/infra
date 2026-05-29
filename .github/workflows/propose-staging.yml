@@ -1,21 +1,13 @@
-name: Deploy Staging
+name: Propose Staging Update
 
-# ─── Triggered by backend/frontend repos after building an image ───
-# Opens a PR to update staging manifest; deploy runs after merge to main.
 on:
   repository_dispatch:
     types: [image-published]
-
-  push:
-    branches: [main]
-    paths:
-      - "environments/staging.manifest.env"
 
 jobs:
   propose-staging-update:
     name: Propose Staging Manifest Update
     runs-on: ubuntu-latest
-    if: github.event_name == 'repository_dispatch'
     permissions:
       contents: write
       pull-requests: write
@@ -25,6 +17,8 @@ jobs:
 
       - name: Update staging manifest
         run: |
+          set -euo pipefail
+
           SERVICE="${{ github.event.client_payload.service }}"
           IMAGE="${{ github.event.client_payload.image }}"
           MANIFEST="environments/staging.manifest.env"
@@ -46,7 +40,7 @@ jobs:
         with:
           token: ${{ secrets.INFRA_PAT }}
           commit-message: "staging(${{ github.event.client_payload.service }}): sha-${{ github.event.client_payload.sha }}"
-          branch: "staging/${{ github.event.client_payload.service }}-${{ github.event.client_payload.sha }}"
+          branch: "deploy/staging/${{ github.event.client_payload.service }}-${{ github.event.client_payload.sha }}"
           delete-branch: true
           title: "🚀 Update staging manifest for ${{ github.event.client_payload.service }}"
           body: |
@@ -59,7 +53,7 @@ jobs:
             | SHA | `${{ github.event.client_payload.sha }}` |
             | Source repo | `${{ github.event.client_payload.repository }}` |
 
-            Merging this PR triggers staging deploy via `cd-staging.yml`.
+            Merging this PR triggers staging deploy via `deploy-staging.yml`.
           labels: |
             staging
             automated
@@ -71,34 +65,3 @@ jobs:
           token: ${{ secrets.INFRA_PAT }}
           pull-request-number: ${{ steps.cpr.outputs.pull-request-number }}
           merge-method: squash
-
-  deploy-staging:
-    name: Deploy to Staging
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push'
-
-    permissions:
-      contents: read
-
-    steps:
-      - uses: actions/checkout@v4
-
-      # ── Deploy via SSH through Cloudflare Tunnel ───────────
-      - name: Install cloudflared
-        run: |
-          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb \
-            -o /tmp/cloudflared.deb
-          sudo dpkg -i /tmp/cloudflared.deb
-
-      - name: Deploy to staging server
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-
-          ssh -o StrictHostKeyChecking=no \
-              -o UserKnownHostsFile=/dev/null \
-              -o "ProxyCommand=cloudflared access ssh --hostname %h --id ${{ secrets.CF_ACCESS_CLIENT_ID }} --secret ${{ secrets.CF_ACCESS_CLIENT_SECRET }}" \
-              -i ~/.ssh/deploy_key \
-              ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
-              "cd ~/ductifact/infra && git pull --ff-only origin main && ./scripts/deploy.sh staging"

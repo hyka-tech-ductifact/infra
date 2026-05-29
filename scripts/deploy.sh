@@ -5,9 +5,11 @@
 #   ./scripts/deploy.sh <environment>          # deploy + smoke tests
 #   ./scripts/deploy.sh <environment> stop     # stop all containers
 #
-#   environment: local | staging | prod
+#   environment: local | staging | production
+#   alias: prod -> production
 #
-# The image and all config come from .env.<environment>.
+# The only runtime source of truth is .env.<environment>.
+# This script never generates or mutates env files; it only consumes them.
 # After a successful deploy, smoke tests run automatically to verify
 # all services are healthy.
 #
@@ -15,7 +17,7 @@
 #   ./scripts/deploy.sh local            # start with local image + smoke
 #   ./scripts/deploy.sh local stop       # stop local environment
 #   ./scripts/deploy.sh staging          # pull + start staging + smoke
-#   ./scripts/deploy.sh prod stop        # stop production
+#   ./scripts/deploy.sh production stop  # stop production
 
 set -euo pipefail
 
@@ -25,14 +27,15 @@ ACTION="${2:-deploy}"
 
 if [[ -z "$ENV" ]]; then
   echo "Usage: $0 <environment> [stop]"
-  echo "  environment: local | staging | prod"
+  echo "  environment: local | staging | production"
   exit 1
 fi
 
 case "$ENV" in
-  local|staging|prod) ;;
+  prod) ENV="production" ;;
+  local|staging|production) ;;
   *)
-    echo "ERROR: unknown environment '$ENV'. Use 'local', 'staging', or 'prod'."
+    echo "ERROR: unknown environment '$ENV'. Use 'local', 'staging', or 'production'."
     exit 1
     ;;
 esac
@@ -53,7 +56,7 @@ INFRA_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$INFRA_DIR"
 
 if [[ ! -f "$ENV_FILE" ]]; then
-  echo "ERROR: $ENV_FILE not found. Copy from ${ENV_FILE}.example and fill in values."
+  echo "ERROR: $ENV_FILE not found. Copy from .env.example and fill in values."
   exit 1
 fi
 
@@ -69,64 +72,46 @@ fi
 CONTAINER_BACKEND="ductifact_${ENV}_backend"
 CONTAINER_FRONTEND="ductifact_${ENV}_frontend"
 
+# ── Pre-deploy validation ────────────────────────────────────
+echo "Running pre-deploy validation..."
+if ! "${SCRIPT_DIR}/validate_env.sh" "$ENV"; then
+  echo "ERROR: Pre-deploy validation failed. Fix .env.example / $ENV_FILE consistency first."
+  exit 1
+fi
+echo ""
+
 # ── Pull latest infra config (skip for local) ────────────────
 if [[ "$ENV" != "local" ]]; then
   echo "Pulling latest infra config..."
   git pull --ff-only origin main
 fi
 
-# ── Read images from manifest (environments/<env>.manifest.env) ───────
-# The manifest is the source of truth for which image versions to deploy.
-# Falls back to .env.<env> if no manifest exists (backward compat).
-case "$ENV" in
-  local)
-    MANIFEST_FILE="${INFRA_DIR}/environments/local.manifest.env"
-    ;;
-  staging)
-    MANIFEST_FILE="${INFRA_DIR}/environments/staging.manifest.env"
-    ;;
-  prod)
-    MANIFEST_FILE="${INFRA_DIR}/environments/production.manifest.env"
-    ;;
-esac
-
-if [[ -f "$MANIFEST_FILE" ]]; then
-  echo "Reading image versions from manifest: $MANIFEST_FILE"
-  BACKEND_IMAGE=$(grep -E '^BACKEND_IMAGE=' "$MANIFEST_FILE" | cut -d'=' -f2-)
-  FRONTEND_IMAGE=$(grep -E '^FRONTEND_IMAGE=' "$MANIFEST_FILE" | cut -d'=' -f2-)
-else
-  echo "No manifest found at $MANIFEST_FILE, reading from $ENV_FILE"
-  BACKEND_IMAGE=$(grep -E '^BACKEND_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
-  FRONTEND_IMAGE=$(grep -E '^FRONTEND_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
-fi
-
-if [[ -z "$BACKEND_IMAGE" ]]; then
-  echo "ERROR: BACKEND_IMAGE not defined"
-  exit 1
-fi
-if [[ -z "$FRONTEND_IMAGE" ]]; then
-  echo "ERROR: FRONTEND_IMAGE not defined"
-  exit 1
-fi
+echo "Reading deployment variables from $ENV_FILE"
+BACKEND_IMAGE=$(grep -E '^BACKEND_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
+FRONTEND_IMAGE=$(grep -E '^FRONTEND_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
+POSTGRES_IMAGE=$(grep -E '^POSTGRES_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
+MINIO_IMAGE=$(grep -E '^MINIO_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
+REDIS_IMAGE=$(grep -E '^REDIS_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
+PROMETHEUS_IMAGE=$(grep -E '^PROMETHEUS_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
+GRAFANA_IMAGE=$(grep -E '^GRAFANA_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
+RELEASE_VERSION=$(grep -E '^RELEASE_VERSION=' "$ENV_FILE" | cut -d'=' -f2- || true)
 
 # Export so docker compose can use them (overrides .env.<env> values)
 export BACKEND_IMAGE
 export FRONTEND_IMAGE
+export POSTGRES_IMAGE
+export MINIO_IMAGE
+export REDIS_IMAGE
+export PROMETHEUS_IMAGE
+export GRAFANA_IMAGE
+export RELEASE_VERSION="${RELEASE_VERSION:-unknown}"
 
 echo "=== Deploying $ENV ==="
 echo "Backend:   $BACKEND_IMAGE"
 echo "Frontend:  $FRONTEND_IMAGE"
-echo "Manifest:  ${MANIFEST_FILE:-none}"
+echo "Release:   $RELEASE_VERSION"
 echo "Env file:  $ENV_FILE"
 echo "Directory: $INFRA_DIR"
-
-# ── Pre-deploy validation ────────────────────────────────────
-echo "Running pre-deploy validation..."
-if ! "${SCRIPT_DIR}/validate.sh" "$ENV"; then
-  echo "ERROR: Pre-deploy validation failed. Fix the issues above before deploying."
-  exit 1
-fi
-echo ""
 
 # ── Pull Docker images (skip for local) ──────────────────────
 if [[ "$ENV" != "local" ]]; then
