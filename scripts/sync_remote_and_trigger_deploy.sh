@@ -87,12 +87,14 @@ mkdir -p ~/.ssh
 printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
 chmod 600 ~/.ssh/deploy_key
 
-cp "$CONFIG_FILE" "$ENV_TMP_FILE"
-printf '\n' >> "$ENV_TMP_FILE"
-cat "$APP_MANIFEST_FILE" >> "$ENV_TMP_FILE"
-printf '\n' >> "$ENV_TMP_FILE"
-cat "$SHARED_IMAGES_FILE" >> "$ENV_TMP_FILE"
-printf '\n' >> "$ENV_TMP_FILE"
+{
+	cat "$CONFIG_FILE"
+	printf '\n'
+	cat "$APP_MANIFEST_FILE"
+	printf '\n'
+	cat "$SHARED_IMAGES_FILE"
+	printf '\n'
+} > "$ENV_TMP_FILE"
 
 sed -i "s|^DB_PASSWORD=.*|DB_PASSWORD=${DB_PASSWORD}|" "$ENV_TMP_FILE"
 sed -i "s|^JWT_SECRET=.*|JWT_SECRET=${JWT_SECRET}|" "$ENV_TMP_FILE"
