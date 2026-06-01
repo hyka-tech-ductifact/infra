@@ -6,7 +6,6 @@
 #   ./scripts/deploy.sh <environment> stop     # stop all containers
 #
 #   environment: local | staging | production
-#   alias: prod -> production
 #
 # The only runtime source of truth is .env.<environment>.
 # This script never generates or mutates env files; it only consumes them.
@@ -32,7 +31,6 @@ if [[ -z "$ENV" ]]; then
 fi
 
 case "$ENV" in
-  prod) ENV="production" ;;
   local|staging|production) ;;
   *)
     echo "ERROR: unknown environment '$ENV'. Use 'local', 'staging', or 'production'."

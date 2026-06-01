@@ -8,7 +8,6 @@
 #   ./scripts/validate_env.sh <environment>
 #
 #   environment: local | staging | production
-#   alias: prod -> production
 #
 # What it checks:
 #   - .env.<environment> exists
@@ -32,7 +31,6 @@ if [[ -z "$ENV" ]]; then
 fi
 
 case "$ENV" in
-  prod) ENV="production" ;;
   local|staging|production) ;;
   *)
     echo "ERROR: unknown environment '$ENV'. Use 'local', 'staging', or 'production'."

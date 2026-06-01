@@ -14,7 +14,6 @@
 #   ./scripts/smoke.sh <environment>
 #
 #   environment: local | staging | production
-#   alias: prod -> production
 #
 # Examples:
 #   ./scripts/smoke.sh local
@@ -59,7 +58,6 @@ if [[ -z "$ENV" ]]; then
 fi
 
 case "$ENV" in
-  prod) ENV="production" ;;
   local|staging|production) ;;
   *)
     echo "ERROR: unknown environment '$ENV'. Use 'local', 'staging', or 'production'."

@@ -49,7 +49,7 @@ cd ~/ductifact/infra
 # Verify: check logs, health endpoints, Grafana
 
 # Then production
-./scripts/deploy.sh prod
+./scripts/deploy.sh production
 # Verify again
 ```
 
