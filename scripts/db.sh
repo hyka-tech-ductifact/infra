@@ -10,7 +10,6 @@
 #   list     <env>                 List available backups
 #
 # Environments: local | staging | production
-# Alias: prod -> production
 #
 # Examples:
 #   ./scripts/db.sh backup  production
@@ -42,7 +41,6 @@ usage() {
 
 validate_env() {
   case "$1" in
-    prod) ENV="production" ;;
     local|staging|production) ;;
     *)
       echo "ERROR: unknown environment '$1'. Use 'local', 'staging', or 'production'."

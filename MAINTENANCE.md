@@ -8,7 +8,7 @@ Operational procedures for the Ductifact production and staging environments run
 
 ```bash
 # Production API (last 100 lines, live)
-docker logs -f --tail=100 ductifact_prod_backend
+docker logs -f --tail=100 ductifact_production_backend
 
 # Staging API
 docker logs -f --tail=100 ductifact_staging_backend
@@ -20,7 +20,7 @@ sudo journalctl -u caddy -f
 sudo journalctl -u cloudflared -f
 
 # All production services
-docker compose --env-file .env.prod logs -f
+docker compose --env-file .env.production logs -f
 
 # All staging services
 docker compose --env-file .env.staging logs -f
@@ -36,23 +36,23 @@ Use `scripts/db.sh` to manage backups:
 
 ```bash
 # Create a backup (saves to /var/backups/ductifact/<env>/)
-./scripts/db.sh backup prod
+./scripts/db.sh backup production
 
 # List available backups
-./scripts/db.sh list prod
+./scripts/db.sh list production
 
 # Restore the latest backup
-./scripts/db.sh restore prod
+./scripts/db.sh restore production
 
 # Restore a specific backup
-./scripts/db.sh restore prod /var/backups/ductifact/prod/20260412_030000.sql.gz
+./scripts/db.sh restore production /var/backups/ductifact/production/20260412_030000.sql.gz
 ```
 
 ### Cron setup (daily at 3:00 AM)
 
 ```bash
 crontab -e
-0 3 * * * cd /opt/ductifact && ./scripts/db.sh backup prod >> /var/log/ductifact-backup.log 2>&1
+0 3 * * * cd /opt/ductifact && ./scripts/db.sh backup production >> /var/log/ductifact-backup.log 2>&1
 ```
 
 Retention: 7 days (configurable in `db.sh`).
@@ -61,7 +61,7 @@ Retention: 7 days (configurable in `db.sh`).
 
 ```bash
 # Load environment variables first
-source .env.staging   # or .env.prod
+source .env.staging   # or .env.production
 
 # Check current migration version
 docker exec ductifact_${ENV}_postgres \
@@ -96,10 +96,10 @@ cd ~/ductifact/infra
 docker images ghcr.io/your-user/ductifact
 
 # Stop the current version
-docker compose --env-file .env.prod stop app
+docker compose --env-file .env.production stop app
 
-# Edit .env.prod temporarily: IMAGE_TAG=v0.3.0
-docker compose --env-file .env.prod up -d app
+# Edit .env.production temporarily: IMAGE_TAG=v0.3.0
+docker compose --env-file .env.production up -d app
 ```
 
 ### Option 2: Hotfix via the `release` branch (minutes, the correct way)

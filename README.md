@@ -56,11 +56,11 @@ This repo is cloned on the server (`~/ductifact/infra/`) and contains everything
 │                                                                   │
 │ 1. Human validates in staging                                     │
 │ 2. Trigger propose-production.yml (manual)                        │
-│ 3. Workflow opens PR bumping RELEASE_VERSION + prod images        │
+│ 3. Workflow opens PR bumping RELEASE_VERSION + production images   │
 │ 4. Human reviews + approves + merges                              │
 │ 5. deploy-production.yml triggers                                 │
-│ 6. _deploy.yml builds .env.prod from environments/* + secrets     │
-│ 7. SSH to server → deploy.sh prod                                 │
+│ 6. _deploy.yml builds .env.production from environments/* + secrets│
+│ 7. SSH to server → deploy.sh production                           │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -109,15 +109,15 @@ cp .env.example .env.local
 # Set local images in .env.local (required for local deploy)
 # BACKEND_IMAGE=backend-app
 # FRONTEND_IMAGE=frontend-app
-# CI-driven deploys build .env.staging/.env.prod from environments/* + GitHub Environment secrets
-# deploy.sh never generates .env files; it only consumes .env.local/.env.staging/.env.prod
+# CI-driven deploys build .env.staging/.env.production from environments/* + GitHub Environment secrets
+# deploy.sh never generates .env files; it only consumes .env.local/.env.staging/.env.production
 
 # 3. Log in to ghcr.io
 echo "YOUR_GITHUB_TOKEN" | docker login ghcr.io -u YOUR_USER --password-stdin
 
 # 4. Start the environments
 ./scripts/deploy.sh staging
-./scripts/deploy.sh prod
+./scripts/deploy.sh production
 ```
 
 ## Required Secrets (GitHub)
@@ -140,7 +140,7 @@ echo "YOUR_GITHUB_TOKEN" | docker login ghcr.io -u YOUR_USER --password-stdin
 
 ## Notes
 
-- `.env.prod`, `.env.staging`, and `.env.local` are **runtime files only** and are **never committed**.
+- `.env.production`, `.env.staging`, and `.env.local` are **runtime files only** and are **never committed**.
 - `.env.example` is the single reference template for all variables.
 - `deploy.sh` reads only `.env.<env>` and treats it as the only runtime source of truth.
 - `environments/*.config.env` and `environments/*manifest.env` are **auxiliary build inputs** used to construct final `.env` files.
