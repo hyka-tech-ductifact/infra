@@ -32,6 +32,21 @@ pass() { echo -e "  ${GREEN}✔${NC} $1"; }
 fail() { echo -e "  ${RED}✘${NC} $1"; FAILURES=$((FAILURES + 1)); }
 info() { echo -e "  ${YELLOW}…${NC} $1"; }
 
+wait_http_ok() {
+  local url="$1"
+  local attempts="${2:-10}"
+  local sleep_seconds="${3:-3}"
+
+  for ((i = 1; i <= attempts; i++)); do
+    if curl -sf --max-time 5 "$url" > /dev/null 2>&1; then
+      return 0
+    fi
+    sleep "$sleep_seconds"
+  done
+
+  return 1
+}
+
 FAILURES=0
 
 # ── Validate arguments ──────────────────────────────────────
@@ -77,13 +92,13 @@ echo ""
 # ── 1. App health endpoint ──────────────────────────────────
 echo "App (${BASE_URL}):"
 
-if curl -sf --max-time 5 "${BASE_URL}/healthz" > /dev/null 2>&1; then
+if wait_http_ok "${BASE_URL}/healthz" 10 3; then
   pass "/healthz (liveness) responds OK"
 else
   fail "/healthz (liveness) is not reachable"
 fi
 
-if curl -sf --max-time 5 "${BASE_URL}/readyz" > /dev/null 2>&1; then
+if wait_http_ok "${BASE_URL}/readyz" 10 3; then
   READYZ_BODY=$(curl -s --max-time 5 "${BASE_URL}/readyz")
   READYZ_STATUS=$(echo "$READYZ_BODY" | grep -o '"status":"[^"]*"' | head -1)
   if echo "$READYZ_STATUS" | grep -q '"status":"ready"'; then
@@ -100,7 +115,7 @@ else
 fi
 
 # ── 2. App metrics endpoint (Prometheus exposition) ─────────
-if curl -sf --max-time 5 "${BASE_URL}/metrics" > /dev/null 2>&1; then
+if wait_http_ok "${BASE_URL}/metrics" 10 3; then
   pass "/metrics endpoint available"
 else
   fail "/metrics endpoint is not reachable"
@@ -181,7 +196,7 @@ fi
 echo ""
 echo "Grafana (${GRAF_URL}):"
 
-if curl -sf --max-time 5 "${GRAF_URL}/api/health" > /dev/null 2>&1; then
+if wait_http_ok "${GRAF_URL}/api/health" 15 3; then
   pass "Grafana is healthy"
 else
   fail "Grafana is not reachable"
