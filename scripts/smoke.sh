@@ -2,13 +2,14 @@
 # smoke.sh — Post-deploy smoke tests for a ductifact environment.
 #
 # Verifies that all services are healthy and communicating:
-#   1. App API responds on /healthz (liveness) and /readyz (readiness)
+#   1. Backend API responds on /healthz (liveness) and /readyz (readiness)
 #   2. PostgreSQL is reachable (via /readyz)
 #   3. MinIO is healthy
 #   4. Redis is healthy
-#   5. Prometheus is healthy
-#   6. Prometheus is scraping the app successfully
-#   7. Grafana is healthy
+#   5. Frontend is healthy
+#   6. Prometheus is healthy
+#   7. Prometheus is scraping the backend successfully
+#   8. Grafana is healthy
 #
 # Usage:
 #   ./scripts/smoke.sh <environment>
@@ -79,7 +80,8 @@ set -a
 source "$ENV_FILE"
 set +a
 
-BASE_URL="http://localhost:${BACKEND_PORT}"
+BACKEND_URL="http://localhost:${BACKEND_PORT}"
+FRONTEND_URL="http://localhost:${FRONTEND_PORT}"
 PROM_CONTAINER="ductifact_${ENV}_prometheus"
 GRAF_URL="http://localhost:${GRAFANA_PORT}"
 
@@ -87,17 +89,17 @@ echo ""
 echo "=== Smoke tests for '$ENV' ==="
 echo ""
 
-# ── 1. App health endpoint ──────────────────────────────────
-echo "App (${BASE_URL}):"
+# ── 1. Backend health endpoint ──────────────────────────────
+echo "Backend (${BACKEND_URL}):"
 
-if wait_http_ok "${BASE_URL}/healthz" 10 3; then
+if wait_http_ok "${BACKEND_URL}/healthz" 10 3; then
   pass "/healthz (liveness) responds OK"
 else
   fail "/healthz (liveness) is not reachable"
 fi
 
-if wait_http_ok "${BASE_URL}/readyz" 10 3; then
-  READYZ_BODY=$(curl -s --max-time 5 "${BASE_URL}/readyz")
+if wait_http_ok "${BACKEND_URL}/readyz" 10 3; then
+  READYZ_BODY=$(curl -s --max-time 5 "${BACKEND_URL}/readyz")
   READYZ_STATUS=$(echo "$READYZ_BODY" | grep -o '"status":"[^"]*"' | head -1)
   if echo "$READYZ_STATUS" | grep -q '"status":"ready"'; then
     pass "/readyz (readiness) responds OK — ready"
@@ -112,14 +114,24 @@ else
   fail "/readyz (readiness) is not reachable (503 or timeout)"
 fi
 
-# ── 2. App metrics endpoint (Prometheus exposition) ─────────
-if wait_http_ok "${BASE_URL}/metrics" 10 3; then
+# ── 2. Backend metrics endpoint (Prometheus exposition) ─────────
+if wait_http_ok "${BACKEND_URL}/metrics" 10 3; then
   pass "/metrics endpoint available"
 else
   fail "/metrics endpoint is not reachable"
 fi
 
-# ── 3. MinIO health ─────────────────────────────────────────
+# ── 3. Frontend health ──────────────────────────────────────
+echo ""
+echo "Frontend (${FRONTEND_URL}):"
+
+if wait_http_ok "${FRONTEND_URL}" 15 3; then
+  pass "Frontend responds OK (Nginx is serving)"
+else
+  fail "Frontend is not reachable"
+fi
+
+# ── 4. MinIO health ─────────────────────────────────────────
 echo ""
 MINIO_CONTAINER="ductifact_${ENV}_minio"
 echo "MinIO (${MINIO_CONTAINER}):"
@@ -136,7 +148,7 @@ else
   fail "MinIO health endpoint is not reachable"
 fi
 
-# ── 4. Redis health ─────────────────────────────────────────
+# ── 5. Redis health ─────────────────────────────────────────
 echo ""
 REDIS_CONTAINER="ductifact_${ENV}_redis"
 echo "Redis (${REDIS_CONTAINER}):"
@@ -153,7 +165,7 @@ else
   fail "Redis is not responding to PING"
 fi
 
-# ── 5. Prometheus health ────────────────────────────────────
+# ── 6. Prometheus health ────────────────────────────────────
 echo ""
 echo "Prometheus (${PROM_CONTAINER}):"
 
@@ -169,7 +181,7 @@ else
   fail "Prometheus is not reachable"
 fi
 
-# ── 6. Prometheus scraping the app ──────────────────────────
+# ── 7. Prometheus scraping the backend ──────────────────────
 # Prometheus may need a few seconds to complete the first scrape after startup.
 SCRAPE_OK=false
 for _ in 1 2 3 4 5; do
@@ -190,7 +202,7 @@ else
   fail "ductifact-api target not healthy"
 fi
 
-# ── 7. Grafana health ──────────────────────────────────────
+# ── 8. Grafana health ──────────────────────────────────────
 echo ""
 echo "Grafana (${GRAF_URL}):"
 

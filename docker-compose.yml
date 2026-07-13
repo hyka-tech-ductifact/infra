@@ -125,6 +125,10 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:${FRONTEND_PORT}:8080"
+    environment:
+      - BACKEND_URL=${BACKEND_HOST}:${BACKEND_PORT}
+      - TOKEN_EXPIRY_MS=${JWT_TOKEN_DURATION}
+      - FILE_STORAGE_URL=${BACKEND_HOST}:${BACKEND_PORT}/files
     depends_on:
       - backend
     healthcheck:
