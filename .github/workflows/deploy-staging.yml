@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - "environments/staging.manifest.env"
+      - "environments/images.manifest.env"
+      - "environments/staging.config.env"
+      - "docker-compose.yml"
 
 concurrency:
   group: deploy-staging
