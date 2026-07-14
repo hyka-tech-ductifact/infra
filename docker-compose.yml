@@ -126,10 +126,10 @@ services:
     ports:
       - "127.0.0.1:${FRONTEND_PORT}:8080"
     environment:
-      - BACKEND_URL=${BACKEND_HOST}:${BACKEND_PORT}
+      - BACKEND_URL=${PUBLIC_BACKEND_URL}
       - TOKEN_ACCESS_EXPIRY_MS=900000
       - TOKEN_REFRESH_EXPIRY_MS=604800000
-      - FILE_STORAGE_URL=${BACKEND_HOST}:${BACKEND_PORT}/files
+      - FILE_STORAGE_URL=${PUBLIC_FILE_STORAGE_URL}
     depends_on:
       - backend
     healthcheck:
