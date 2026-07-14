@@ -30,6 +30,19 @@ require_env_var() {
 	fi
 }
 
+escape_sed_replacement() {
+	printf '%s' "$1" | sed 's/[|&\\]/\\&/g'
+}
+
+set_env_value() {
+	local key="$1"
+	local value="$2"
+	local escaped_value
+
+	escaped_value=$(escape_sed_replacement "$value")
+	sed -i "s|^${key}=.*|${key}=${escaped_value}|" "$ENV_TMP_FILE"
+}
+
 if [[ -z "$ENVIRONMENT" ]]; then
 	usage
 fi
@@ -96,13 +109,13 @@ chmod 600 ~/.ssh/deploy_key
 	printf '\n'
 } > "$ENV_TMP_FILE"
 
-sed -i "s|^DB_PASSWORD=.*|DB_PASSWORD=${DB_PASSWORD}|" "$ENV_TMP_FILE"
-sed -i "s|^JWT_SECRET=.*|JWT_SECRET=${JWT_SECRET}|" "$ENV_TMP_FILE"
-sed -i "s|^MINIO_ROOT_USER=.*|MINIO_ROOT_USER=${MINIO_ROOT_USER}|" "$ENV_TMP_FILE"
-sed -i "s|^MINIO_ROOT_PASSWORD=.*|MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}|" "$ENV_TMP_FILE"
-sed -i "s|^SMTP_USERNAME=.*|SMTP_USERNAME=${SMTP_USERNAME}|" "$ENV_TMP_FILE"
-sed -i "s|^SMTP_PASSWORD=.*|SMTP_PASSWORD=${SMTP_PASSWORD}|" "$ENV_TMP_FILE"
-sed -i "s|^REDIS_PASSWORD=.*|REDIS_PASSWORD=${REDIS_PASSWORD}|" "$ENV_TMP_FILE"
+set_env_value "DB_PASSWORD" "$DB_PASSWORD"
+set_env_value "JWT_SECRET" "$JWT_SECRET"
+set_env_value "MINIO_ROOT_USER" "$MINIO_ROOT_USER"
+set_env_value "MINIO_ROOT_PASSWORD" "$MINIO_ROOT_PASSWORD"
+set_env_value "SMTP_USERNAME" "$SMTP_USERNAME"
+set_env_value "SMTP_PASSWORD" "$SMTP_PASSWORD"
+set_env_value "REDIS_PASSWORD" "$REDIS_PASSWORD"
 
 INVALID_ENV_LINES=$(grep -nEv '^\s*$|^\s*#|^[A-Za-z_][A-Za-z0-9_]*=.*$' "$ENV_TMP_FILE" || true)
 if [[ -n "$INVALID_ENV_LINES" ]]; then
