@@ -13,7 +13,7 @@ jobs:
       pull-requests: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Update staging manifest
         run: |
@@ -36,7 +36,7 @@ jobs:
 
       - name: Create Pull Request
         id: cpr
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ secrets.INFRA_PAT }}
           commit-message: "staging(${{ github.event.client_payload.service }}): sha-${{ github.event.client_payload.sha }}"
