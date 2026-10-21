@@ -13,7 +13,7 @@ jobs:
     name: Validate configs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install shellcheck
         run: sudo apt-get -qq install -y shellcheck > /dev/null
