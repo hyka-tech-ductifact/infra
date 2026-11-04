@@ -22,7 +22,7 @@ jobs:
       pull-requests: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -104,7 +104,7 @@ jobs:
           echo "frontend_image=${STAGING_FRONTEND_IMAGE}" >> "$GITHUB_OUTPUT"
 
       - name: Create Pull Request
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ secrets.INFRA_PAT }}
           commit-message: "production: promote staging images (${{ steps.promote.outputs.release_version }})"
