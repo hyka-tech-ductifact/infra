@@ -9,12 +9,12 @@
 #   2. Prometheus config + alert rules
 #   3. Grafana dashboards (JSON) + provisioning (YAML)
 #   4. ShellCheck on all scripts
-#   5. environments/images.manifest.env — platform image keys derived from .env.example
-#   6. environments/*.config.env — config + secret keys derived from .env.example
+#   5. environments/images.manifest.env — platform image keys derived from .env.contract
+#   6. environments/*.config.env — config + secret keys derived from .env.contract
 #   6b. environments/* — secret whitelist: no key from SECRET_KEYS may have a real value
 #   7. environments/production.manifest.env — RELEASE_VERSION present semver
 #
-# .env.example is the single source of truth for which variables must be defined.
+# .env.contract is the single source of truth for which variables must be defined.
 
 set -euo pipefail
 
@@ -129,27 +129,27 @@ else
   done
 fi
 
-# ── Derive key sets from .env.example (single source of truth) ───────────────
-EXAMPLE_FILE=".env.example"
+# ── Derive key sets from .env.contract (single source of truth) ───────────────
+CONTRACT_FILE=".env.contract"
 
-if [[ ! -f "$EXAMPLE_FILE" ]]; then
-  echo "ERROR: $EXAMPLE_FILE not found — cannot derive expected keys."
+if [[ ! -f "$CONTRACT_FILE" ]]; then
+  echo "ERROR: $CONTRACT_FILE not found — cannot derive expected keys."
   exit 1
 fi
 
-# Keys whose value in .env.example is SECRET_IN_GITHUB_ENV
-mapfile -t SECRET_KEYS < <(grep -E '^[A-Z_]+=SECRET_IN_GITHUB_ENV$' "$EXAMPLE_FILE" | cut -d= -f1)
+# Keys whose value in .env.contract is SECRET_IN_GITHUB_ENV
+mapfile -t SECRET_KEYS < <(grep -E '^[A-Z_]+=SECRET_IN_GITHUB_ENV$' "$CONTRACT_FILE" | cut -d= -f1)
 
 # Platform image keys: *_IMAGE entries that are NOT local-only (BACKEND_IMAGE, FRONTEND_IMAGE)
 LOCAL_ONLY_IMAGE_KEYS=(BACKEND_IMAGE FRONTEND_IMAGE)
 mapfile -t PLATFORM_IMAGE_KEYS < <(
-  grep -E '^[A-Z_]+_IMAGE=' "$EXAMPLE_FILE" | cut -d= -f1 | grep -vFf <(printf '%s\n' "${LOCAL_ONLY_IMAGE_KEYS[@]}")
+  grep -E '^[A-Z_]+_IMAGE=' "$CONTRACT_FILE" | cut -d= -f1 | grep -vFf <(printf '%s\n' "${LOCAL_ONLY_IMAGE_KEYS[@]}")
 )
 
 # Config keys: all non-comment keys that are not secrets, not images (platform or local-only)
 ALL_EXCLUDE_KEYS=("${SECRET_KEYS[@]}" "${LOCAL_ONLY_IMAGE_KEYS[@]}" "${PLATFORM_IMAGE_KEYS[@]}")
 mapfile -t CONFIG_KEYS < <(
-  grep -E '^[A-Z_]+=' "$EXAMPLE_FILE" | cut -d= -f1 | grep -vFf <(printf '%s\n' "${ALL_EXCLUDE_KEYS[@]}")
+  grep -E '^[A-Z_]+=' "$CONTRACT_FILE" | cut -d= -f1 | grep -vFf <(printf '%s\n' "${ALL_EXCLUDE_KEYS[@]}")
 )
 
 # ── 5. Shared images manifest ─────────────────────────────────

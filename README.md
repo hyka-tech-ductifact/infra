@@ -23,7 +23,7 @@ This repo is cloned on the server (`~/ductifact/infra/`) and contains everything
 │   ├── staging.manifest.env     # Staging manifest (image versions)
 │   ├── staging.config.env       # Staging runtime config + explicit secret placeholders
 │   └── images.manifest.env      # Shared infra/base images (postgres, redis, RustFS (S3), ...)
-├── .env.example                 # Single environment variables template (reference only)
+├── .env.contract                # Required variables + secret markers; also a template
 ├── observability/               # Prometheus + Grafana configuration
 │   ├── prometheus/
 │   │   ├── prometheus.yml
@@ -34,7 +34,8 @@ This repo is cloned on the server (`~/ductifact/infra/`) and contains everything
 └── scripts/
     ├── deploy.sh                # Deploy script (reads only .env.<env>)
     ├── smoke.sh                 # Post-deploy health checks
-    └── validate.sh              # Pre-deploy validation
+    ├── validate_env.sh          # Runtime env validation against .env.contract
+    └── validate_repo.sh         # Repo validation using .env.contract key sets
 ```
 
 ## Deployment Flow
@@ -104,8 +105,8 @@ git push origin main
 git clone https://github.com/hyka-tech-ductifact/infra.git ~/ductifact/infra
 cd ~/ductifact/infra
 
-# 2. Optional local bootstrap: use the single template as reference
-cp .env.example .env.local
+# 2. Optional local bootstrap: copy the contract and replace example values
+cp .env.contract .env.local
 # Set local images in .env.local (required for local deploy)
 # BACKEND_IMAGE=backend-app
 # FRONTEND_IMAGE=frontend-app
@@ -150,7 +151,7 @@ Before deploying this change to an existing environment:
 
 1. Create `S3_ACCESS_KEY` and `S3_SECRET_KEY` in both GitHub Environments
    (`staging` and `production`), and update any manually maintained `.env.*` files
-   to the keys in `.env.example`, including `S3_IMAGE`.
+   to the keys in `.env.contract`, including `S3_IMAGE`.
 2. Back up the existing object store. Start RustFS separately with a fresh volume
    and configure two S3 remotes in `rclone`: `source` for the previous server and
    `destination` for RustFS. Keep the current bucket name for each environment.
@@ -173,8 +174,10 @@ storage metrics collection is not configured in this stack yet.
 ## Notes
 
 - `.env.production`, `.env.staging`, and `.env.local` are **runtime files only** and are **never committed**.
-- `.env.example` is the single reference template for all variables.
-- `deploy.sh` reads only `.env.<env>` and treats it as the only runtime source of truth.
+- `.env.contract` defines the required runtime variables and identifies secrets with `SECRET_IN_GITHUB_ENV`. It also serves as a template; its example values are not runtime defaults.
+- `validate_env.sh` checks that variables from `.env.contract` are present and non-empty in `.env.<env>`.
+- `validate_repo.sh` derives config, platform image, and secret key sets from `.env.contract` to validate `environments/*`.
+- `deploy.sh` validates `.env.<env>` against the contract before deploying, then consumes that file as its only runtime source of truth.
 - `environments/*.config.env` and `environments/*manifest.env` are **auxiliary build inputs** used to construct final `.env` files.
 - Sensitive values are never committed; placeholders in config (`SECRET_IN_GITHUB_ENV`) are replaced in CI.
 - Staging and production use **different credentials** (DB, JWT).

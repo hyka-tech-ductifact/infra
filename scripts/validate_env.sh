@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# validate_env.sh — Validate a runtime env file against .env.example.
+# validate_env.sh — Validate a runtime env file against .env.contract.
 #
 # Run automatically by deploy.sh before every deploy.
 # Run locally to verify .env.<environment> is complete before deploying.
@@ -11,7 +11,7 @@
 #
 # What it checks:
 #   - .env.<environment> exists
-#   - Every variable defined in .env.example is present and non-empty in .env.<environment>
+#   - Every variable defined in .env.contract is present and non-empty in .env.<environment>
 
 set -euo pipefail
 
@@ -41,20 +41,20 @@ esac
 INFRA_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$INFRA_DIR"
 
-EXAMPLE_FILE=".env.example"
+CONTRACT_FILE=".env.contract"
 ACTUAL_FILE=".env.${ENV}"
 
 echo ""
 echo "=== validate_env ($ENV) ==="
 echo ""
 
-if [[ ! -f "$EXAMPLE_FILE" ]]; then
-  echo "ERROR: $EXAMPLE_FILE not found."
+if [[ ! -f "$CONTRACT_FILE" ]]; then
+  echo "ERROR: $CONTRACT_FILE not found."
   exit 1
 fi
 
 if [[ ! -f "$ACTUAL_FILE" ]]; then
-  fail "$ACTUAL_FILE not found — copy from $EXAMPLE_FILE and fill in values"
+  fail "$ACTUAL_FILE not found — copy from $CONTRACT_FILE and fill in values"
   echo ""
   echo -e "${RED}1 check(s) failed.${NC}"
   exit 1
@@ -79,10 +79,10 @@ while IFS='=' read -r key _; do
       empty_vars+=("$key")
     fi
   fi
-done < <(grep -E '^[A-Z_]+=.' "$EXAMPLE_FILE")
+done < <(grep -E '^[A-Z_]+=.' "$CONTRACT_FILE")
 
 if [[ ${#missing_vars[@]} -eq 0 && ${#empty_vars[@]} -eq 0 ]]; then
-  pass "All variables from $EXAMPLE_FILE are present and non-empty in $ACTUAL_FILE"
+  pass "All variables from $CONTRACT_FILE are present and non-empty in $ACTUAL_FILE"
 else
   if [[ ${#missing_vars[@]} -gt 0 ]]; then
     fail "Missing in $ACTUAL_FILE: ${missing_vars[*]}"

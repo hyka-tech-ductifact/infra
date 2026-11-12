@@ -54,7 +54,7 @@ INFRA_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$INFRA_DIR"
 
 if [[ ! -f "$ENV_FILE" ]]; then
-  echo "ERROR: $ENV_FILE not found. Copy from .env.example and fill in values."
+  echo "ERROR: $ENV_FILE not found. Copy from .env.contract and fill in values."
   exit 1
 fi
 
@@ -73,7 +73,7 @@ CONTAINER_FRONTEND="ductifact_${ENV}_frontend"
 # ── Pre-deploy validation ────────────────────────────────────
 echo "Running pre-deploy validation..."
 if ! "${SCRIPT_DIR}/validate_env.sh" "$ENV"; then
-  echo "ERROR: Pre-deploy validation failed. Fix .env.example / $ENV_FILE consistency first."
+  echo "ERROR: Pre-deploy validation failed. Fix .env.contract / $ENV_FILE consistency first."
   exit 1
 fi
 echo ""
