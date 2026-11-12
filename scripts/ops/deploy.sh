@@ -1,22 +1,9 @@
 #!/usr/bin/env bash
-# deploy.sh — Deploy or stop a ductifact environment.
-#
-# Usage:
-#   ./scripts/deploy.sh <environment>          # deploy + smoke tests
-#   ./scripts/deploy.sh <environment> stop     # stop all containers
-#
-#   environment: local | staging | production
-#
-# The only runtime source of truth is .env.<environment>.
-# This script never generates or mutates env files; it only consumes them.
-# After a successful deploy, smoke tests run automatically to verify
-# all services are healthy.
-#
-# Examples:
-#   ./scripts/deploy.sh local            # start with local image + smoke
-#   ./scripts/deploy.sh local stop       # stop local environment
-#   ./scripts/deploy.sh staging          # pull + start staging + smoke
-#   ./scripts/deploy.sh production stop  # stop production
+# Deploy or stop services using an existing .env.<environment>.
+# Runs on: Local machine or target server.
+# Called by: Operator or ci/deploy_remote.sh over SSH.
+# Calls: checks/env.sh before deployment; checks/health.sh afterwards.
+# Usage: ./scripts/ops/deploy.sh <local|staging|production> [stop]
 
 set -euo pipefail
 
@@ -50,11 +37,11 @@ ENV_FILE=".env.${ENV}"
 
 # ── Navigate to infra directory ──────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-INFRA_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+INFRA_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$INFRA_DIR"
 
 if [[ ! -f "$ENV_FILE" ]]; then
-  echo "ERROR: $ENV_FILE not found. Generate it with ./scripts/generate_env.sh $ENV (CI provides secrets for staging/production)."
+  echo "ERROR: $ENV_FILE not found. Generate it with ./scripts/ops/generate_env.sh $ENV (CI provides secrets for staging/production)."
   exit 1
 fi
 
@@ -72,7 +59,7 @@ CONTAINER_FRONTEND="ductifact_${ENV}_frontend"
 
 # ── Pre-deploy validation ────────────────────────────────────
 echo "Running pre-deploy validation..."
-if ! "${SCRIPT_DIR}/validate_env.sh" "$ENV"; then
+if ! "${SCRIPT_DIR}/../checks/env.sh" "$ENV"; then
   echo "ERROR: Pre-deploy validation failed. Fix the generation inputs and regenerate $ENV_FILE."
   exit 1
 fi
@@ -140,7 +127,7 @@ docker image prune -f
 
 # ── Post-deploy smoke tests ──────────────────────────────────
 echo "Running post-deploy smoke tests..."
-if "${SCRIPT_DIR}/smoke.sh" "$ENV"; then
+if "${SCRIPT_DIR}/../checks/health.sh" "$ENV"; then
   echo "=== $ENV deploy successful! ==="
 else
   echo "ERROR: Deploy completed but smoke tests failed!"

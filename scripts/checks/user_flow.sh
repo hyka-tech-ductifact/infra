@@ -1,25 +1,9 @@
 #!/usr/bin/env bash
-# flow.sh — Full user-flow smoke test for a ductifact environment.
-#
-# Simulates a complete new-user journey through the entire API:
-#   1. Register a new user
-#   2. Create a client
-#   3. Create a project under the client
-#   4. Create a piece definition with an image
-#   5. Verify the image is served via file proxy
-#   6. Create an order under the project
-#   7. Create a piece in the order (linked to the definition)
-#   8. Verify everything is retrievable
-#   9. Clean up: delete all created resources
-#
-# Usage:
-#   ./scripts/flow.sh <environment>
-#
-#   environment: local | staging | production
-#
-# Examples:
-#   ./scripts/flow.sh local
-#   ./scripts/flow.sh staging
+# Exercise the API user journey, creating and cleaning up test data.
+# Runs on: Machine running the target containers.
+# Called by: Operator explicitly; not part of automatic deployment.
+# Calls: No other repository scripts.
+# Usage: ./scripts/checks/user_flow.sh <local|staging|production>
 
 set -euo pipefail
 
@@ -53,7 +37,7 @@ case "$ENV" in
 esac
 
 # ── Load env file ───────────────────────────────────────────
-INFRA_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+INFRA_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_FILE="${INFRA_DIR}/.env.${ENV}"
 
 if [[ ! -f "$ENV_FILE" ]]; then
@@ -123,7 +107,7 @@ auth_del()  { curl -sf -w "\n%{http_code}" -X DELETE -H "Authorization: Bearer $
 step "2. Create client"
 
 CLIENT_RESPONSE=$(auth_post "$BASE_URL/clients" \
-  '{"name":"Flow Test Client","phone":"+34 600 000 001","email":"client@flow.test","description":"Created by flow.sh"}')
+  '{"name":"Flow Test Client","phone":"+34 600 000 001","email":"client@flow.test","description":"Created by user_flow.sh"}')
 
 CLIENT_STATUS=$(echo "$CLIENT_RESPONSE" | tail -1)
 CLIENT_BODY=$(echo "$CLIENT_RESPONSE" | sed '$d')
@@ -136,7 +120,7 @@ pass "Client ID: $CLIENT_ID"
 step "3. Create project under client"
 
 PROJECT_RESPONSE=$(auth_post "$BASE_URL/clients/$CLIENT_ID/projects" \
-  '{"name":"Flow Test Project","address":"Calle Test 1","manager_name":"Flow Manager","description":"Created by flow.sh"}')
+  '{"name":"Flow Test Project","address":"Calle Test 1","manager_name":"Flow Manager","description":"Created by user_flow.sh"}')
 
 PROJECT_STATUS=$(echo "$PROJECT_RESPONSE" | tail -1)
 PROJECT_BODY=$(echo "$PROJECT_RESPONSE" | sed '$d')

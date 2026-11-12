@@ -1,20 +1,9 @@
 #!/usr/bin/env bash
-# validate_repo.sh — Validate repo-level infra assets and auxiliary build inputs.
-#
-# Runs automatically in CI on every PR.
-# Run locally before pushing changes to infra config files.
-#
-# Checks:
-#   1. docker-compose.yml syntax
-#   2. Prometheus config + alert rules
-#   3. Grafana dashboards (JSON) + provisioning (YAML)
-#   4. ShellCheck on all scripts
-#   5. environments/images.manifest.env — platform image keys derived from .env.contract
-#   6. environments/*.config.env — config + secret keys derived from .env.contract
-#   6b. environments/* — secret placeholders required outside local development defaults
-#   7. environments/production.manifest.env — RELEASE_VERSION present semver
-#
-# .env.contract is the single source of truth for which variables must be defined.
+# Validate repository configuration and generated environments.
+# Runs on: GitHub Actions runner, or developer machine.
+# Called by: PR workflow or operator.
+# Calls: ops/generate_env.sh (with dummy CI secrets).
+# Usage: ./scripts/ci/check_repo.sh
 
 set -euo pipefail
 
@@ -28,7 +17,7 @@ fail() { echo -e "  ${RED}✘${NC} $1"; FAILURES=$((FAILURES + 1)); }
 info() { echo -e "  ${YELLOW}…${NC} $1"; }
 
 FAILURES=0
-INFRA_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+INFRA_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$INFRA_DIR"
 
 echo ""
@@ -120,7 +109,7 @@ echo "ShellCheck:"
 if ! command -v shellcheck > /dev/null 2>&1; then
   fail "shellcheck is not installed (apt install shellcheck)"
 else
-  for f in scripts/*.sh; do
+  for f in scripts/{ci,ops,checks}/*.sh; do
     if shellcheck "$f" > /dev/null 2>&1; then
       pass "$(basename "$f") passes shellcheck"
     else
@@ -243,7 +232,7 @@ for key in "${SECRET_KEYS[@]}"; do
   export "$key=ci-validation-only"
 done
 for environment in local staging production; do
-  if ./scripts/generate_env.sh "$environment" --output "${ENV_CHECK_DIR}/.env.${environment}"; then
+  if ./scripts/ops/generate_env.sh "$environment" --output "${ENV_CHECK_DIR}/.env.${environment}"; then
     pass "$environment runtime file can be generated and validated"
   else
     fail "$environment runtime generation failed"

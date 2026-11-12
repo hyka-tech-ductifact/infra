@@ -1,24 +1,9 @@
 #!/usr/bin/env bash
-# smoke.sh — Post-deploy smoke tests for a ductifact environment.
-#
-# Verifies that all services are healthy and communicating:
-#   1. Backend API responds on /healthz (liveness) and /readyz (readiness)
-#   2. PostgreSQL is reachable (via /readyz)
-#   3. S3 storage is healthy
-#   4. Redis is healthy
-#   5. Frontend is healthy
-#   6. Prometheus is healthy
-#   7. Prometheus is scraping the backend successfully
-#   8. Grafana is healthy
-#
-# Usage:
-#   ./scripts/smoke.sh <environment>
-#
-#   environment: local | staging | production
-#
-# Examples:
-#   ./scripts/smoke.sh local
-#   ./scripts/smoke.sh staging
+# Check service health and communication after deployment.
+# Runs on: Machine running the target containers.
+# Called by: ops/deploy.sh or operator for diagnosis.
+# Calls: No other repository scripts.
+# Usage: ./scripts/checks/health.sh <local|staging|production>
 
 set -euo pipefail
 
@@ -67,7 +52,7 @@ case "$ENV" in
 esac
 
 # ── Load env file ───────────────────────────────────────────
-INFRA_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+INFRA_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_FILE="${INFRA_DIR}/.env.${ENV}"
 
 if [[ ! -f "$ENV_FILE" ]]; then

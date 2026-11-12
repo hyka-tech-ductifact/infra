@@ -37,7 +37,7 @@ CI validates compose syntax, Prometheus config, Grafana dashboards, and deploy s
 ## 3) Generate and deploy environments
 
 Make persistent configuration/image changes in `environments/`. CI combines those
-inputs with GitHub Environment secrets using `scripts/generate_env.sh`, copies the
+inputs with GitHub Environment secrets using `scripts/ops/generate_env.sh`, copies the
 final `.env.staging` or `.env.production` to the server, then runs `deploy.sh`.
 Deploy staging first and validate it before promoting to production.
 
@@ -45,8 +45,8 @@ For local testing, build the images named in `environments/local.manifest.env`,
 then run:
 
 ```bash
-./scripts/generate_env.sh local
-./scripts/deploy.sh local
+./scripts/ops/generate_env.sh local
+./scripts/ops/deploy.sh local
 ```
 
 Edit `.env.local` directly for personal settings. It is ignored by Git, and
@@ -55,7 +55,7 @@ replaces the entire file with the versioned development defaults.
 `deploy.sh` only consumes the final `.env.<environment>`.
 See [local setup](README.md#local-deployment) for image builds and SMTP setup.
 
-Run `./scripts/validate_repo.sh` before pushing. It generates and validates all
+Run `./scripts/ci/check_repo.sh` before pushing. It generates and validates all
 three environment files with dummy CI secrets, without deploying.
 
 ---

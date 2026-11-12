@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-# Basic runtime checks against .env.contract; no connectivity checks.
-# Usage: ./scripts/validate_env.sh <local|staging|production> [--file PATH]
+# Check runtime variables against .env.contract.
+# Runs on: Developer machine, CI runner, or target server.
+# Called by: ops/generate_env.sh, ops/deploy.sh, or operator.
+# Calls: No other repository scripts; no connectivity checks.
+# Usage: ./scripts/checks/env.sh <local|staging|production> [--file PATH]
+
 set -euo pipefail
 
-INFRA_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+INFRA_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV="${1:-}"
 case "$ENV" in
   local|staging|production) shift ;;

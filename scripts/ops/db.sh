@@ -1,26 +1,9 @@
 #!/usr/bin/env bash
-# db.sh — Manage PostgreSQL backups (create, restore, list).
-#
-# Usage:
-#   ./scripts/db.sh <command> <environment> [backup_file]
-#
-# Commands:
-#   backup   <env>                 Create a compressed backup
-#   restore  <env> [backup_file]   Restore a backup (latest if omitted)
-#   list     <env>                 List available backups
-#
-# Environments: local | staging | production
-#
-# Examples:
-#   ./scripts/db.sh backup  production
-#   ./scripts/db.sh restore staging
-#   ./scripts/db.sh restore staging ~/backups/ductifact/staging/20260412_030000.sql.gz
-#   ./scripts/db.sh list    production
-#
-# Cron setup (daily at 3:00 AM):
-# crontab -e (to edit)
-# crontab -l (to list)
-#   0 3 * * * cd ~/ductifact/infra && ./scripts/db.sh backup production >> ~/backups/ductifact/backup.log 2>&1
+# Create, restore, or list PostgreSQL backups.
+# Runs on: Machine running the target database container.
+# Called by: Operator; backups can also run from cron.
+# Calls: No other repository scripts.
+# Usage: ./scripts/ops/db.sh <backup|restore|list> <local|staging|production> [backup_file]
 
 set -euo pipefail
 
@@ -51,7 +34,7 @@ validate_env() {
 
 load_env() {
   SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-  INFRA_DIR="$(dirname "$SCRIPT_DIR")"
+  INFRA_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
   ENV_FILE="${INFRA_DIR}/.env.${ENV}"
 
   if [[ ! -f "$ENV_FILE" ]]; then

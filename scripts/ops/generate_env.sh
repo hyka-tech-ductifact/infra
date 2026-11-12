@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# Build .env.<environment> from config, app images, and shared images.
-# Usage: ./scripts/generate_env.sh <local|staging|production> [--output PATH] [--force]
-# Local uses development values; staging/production secrets come from CI.
+# Build and validate a runtime .env.<environment> file.
+# Runs on: Developer machine or GitHub Actions runner.
+# Called by: Operator, ci/check_repo.sh, or ci/deploy_remote.sh.
+# Calls: checks/env.sh.
+# Usage: ./scripts/ops/generate_env.sh <local|staging|production> [--output PATH] [--force]
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-INFRA_DIR="$(dirname "$SCRIPT_DIR")"
+INFRA_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ENV="${1:-}"
 case "$ENV" in
   local|staging|production) shift ;;
@@ -64,7 +67,7 @@ for file in "${INPUTS[@]}"; do
   printf '\n'
 done > "$TMP_FILE"
 
-"${SCRIPT_DIR}/validate_env.sh" "$ENV" --file "$TMP_FILE"
+"${SCRIPT_DIR}/../checks/env.sh" "$ENV" --file "$TMP_FILE"
 if [[ "$FORCE" == true ]]; then
   mv -f "$TMP_FILE" "$OUTPUT"
 else

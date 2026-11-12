@@ -1,17 +1,14 @@
 #!/usr/bin/env bash
-# sync_remote_and_trigger_deploy.sh — Build a runtime env file, copy it to the VPS, and trigger deploy.sh.
-#
-# Intended to run inside GitHub Actions.
-#
-# Usage:
-#   ./scripts/sync_remote_and_trigger_deploy.sh <environment>
-#
-#   environment: staging | production
+# Generate an environment, upload it, and trigger deployment.
+# Runs on: GitHub Actions runner with CI secrets and SSH access.
+# Called by: Staging/production deployment workflows.
+# Calls: ops/generate_env.sh; ops/deploy.sh on the server over SSH.
+# Usage: ./scripts/ci/deploy_remote.sh <staging|production>
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-INFRA_DIR="$(dirname "$SCRIPT_DIR")"
+INFRA_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$INFRA_DIR"
 
 ENVIRONMENT="${1:-}"
@@ -36,7 +33,7 @@ trap 'rm -rf "$ENV_TMP_DIR"' EXIT
 ENV_TMP_FILE="${ENV_TMP_DIR}/${ENV_FILE_NAME}"
 
 # Shared with local generation; resolves CI secrets and validates before SSH.
-"${SCRIPT_DIR}/generate_env.sh" "$ENVIRONMENT" --output "$ENV_TMP_FILE"
+"${SCRIPT_DIR}/../ops/generate_env.sh" "$ENVIRONMENT" --output "$ENV_TMP_FILE"
 
 if ! command -v cloudflared > /dev/null 2>&1; then
 	echo "Installing cloudflared..."
@@ -64,4 +61,4 @@ ssh -o StrictHostKeyChecking=no \
 		-o "ProxyCommand=${SSH_PROXY}" \
 		-i ~/.ssh/deploy_key \
 		"${VPS_USER}@${VPS_HOST}" \
-		"cd ~/ductifact/infra && git pull --ff-only origin main && ./scripts/deploy.sh ${ENVIRONMENT}"
+		"cd ~/ductifact/infra && git pull --ff-only origin main && ./scripts/ops/deploy.sh ${ENVIRONMENT}"

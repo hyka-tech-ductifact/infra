@@ -33,13 +33,13 @@ This repo is cloned on the server (`~/ductifact/infra/`) and contains everything
 │       ├── provisioning/
 │       └── dashboards/
 └── scripts/
-    ├── generate_env.sh         # Build and validate a final .env.<env>
-    ├── sync_remote_and_trigger_deploy.sh # CI: generate, copy over SSH, deploy
-    ├── deploy.sh               # Consume .env.<env>; validate, deploy, smoke tests
-    ├── smoke.sh                 # Post-deploy health checks
-    ├── validate_env.sh         # Runtime env validation against .env.contract
-    └── validate_repo.sh        # Repo validation, including all environment inputs
+    ├── README.md               # Commands, execution locations, and call map
+    ├── ci/                     # GitHub Actions entry points
+    ├── ops/                    # Generate environments, deploy, and manage backups
+    └── checks/                 # Environment, health, and user-flow checks
 ```
+
+See [the script guide](scripts/README.md) for commands and which checks run automatically.
 
 ## Environment files and deployment
 
@@ -69,13 +69,13 @@ For staging/production, make persistent changes in `environments/` and GitHub
 Environment secrets; direct runtime edits are replaced by the next CI deployment.
 
 Staging flow: image publication → staging manifest PR + CI + auto-merge →
-`deploy-staging.yml` → `sync_remote_and_trigger_deploy.sh staging` →
+`deploy-staging.yml` → `deploy_remote.sh staging` →
 `generate_env.sh staging` with GitHub Environment secrets → copy `.env.staging`
 to the server → `deploy.sh staging`.
 
 Production flow: validate staging → run `propose-production.yml` → review and
 merge the promotion PR → `deploy-production.yml` →
-`sync_remote_and_trigger_deploy.sh production` → `generate_env.sh production`
+`deploy_remote.sh production` → `generate_env.sh production`
 with GitHub Environment secrets → copy `.env.production` to the server →
 `deploy.sh production`.
 
@@ -128,8 +128,8 @@ docker build -t backend-app ../backend
 docker build -t frontend-app ../frontend
 
 # Prepare the final runtime configuration, then deploy
-./scripts/generate_env.sh local
-./scripts/deploy.sh local
+./scripts/ops/generate_env.sh local
+./scripts/ops/deploy.sh local
 ```
 
 `local.config.env` contains development-only credentials. Never reuse them in
@@ -146,13 +146,13 @@ PUBLIC_FILE_STORAGE_URL=http://localhost:8123/v1/files
 Validate without deploying:
 
 ```bash
-./scripts/validate_env.sh local
+./scripts/checks/env.sh local
 ```
 
 To explicitly start over from the versioned defaults:
 
 ```bash
-./scripts/generate_env.sh local --force
+./scripts/ops/generate_env.sh local --force
 ```
 
 This replaces all settings, including credentials. With existing volumes, keep
@@ -175,11 +175,11 @@ For scripts/CI, `--output PATH` chooses a different output destination:
 
 ```bash
 # Required application secrets must already be exported by CI
-./scripts/generate_env.sh staging --output /tmp/.env.staging
-./scripts/validate_env.sh staging --file /tmp/.env.staging
+./scripts/ops/generate_env.sh staging --output /tmp/.env.staging
+./scripts/checks/env.sh staging --file /tmp/.env.staging
 ```
 
-On the server, `./scripts/deploy.sh staging` or `production` deploys the final
+On the server, `./scripts/ops/deploy.sh staging` or `production` deploys the final
 file already installed by CI. It does not regenerate configuration.
 
 ## Required Secrets (GitHub)
@@ -220,14 +220,14 @@ Before deploying this change to an existing environment:
    `rclone copy source:BUCKET destination:BUCKET`, then verify them with
    `rclone check source:BUCKET destination:BUCKET --download`.
 4. Point the `s3` service at the populated RustFS volume before deploying, then
-   run `./scripts/smoke.sh staging` (or `production`) and verify existing images
+   run `./scripts/checks/health.sh staging` (or `production`) and verify existing images
    through the API before resuming writes.
 
 The new volume is `ductifact-<environment>_rustfs_data` by default. The previous
 server's volume is retained; its data format must not be mounted directly into
 RustFS. A normal deploy does not copy objects into the new volume.
 
-Storage health is checked by Compose and `smoke.sh` via `/health`, and the backend
+Storage health is checked by Compose and `health.sh` via `/health`, and the backend
 checks S3 connectivity through `/readyz`. RustFS metrics require an
 [OpenTelemetry Collector](https://docs.rustfs.com/en/operations/observability);
 storage metrics collection is not configured in this stack yet.
@@ -236,8 +236,8 @@ storage metrics collection is not configured in this stack yet.
 
 - `.env.production`, `.env.staging`, and `.env.local` are **runtime files only** and are **never committed**.
 - `.env.contract` defines required runtime variables and identifies secret keys with `SECRET_IN_GITHUB_ENV`. Use `generate_env.sh` to prepare runtime files.
-- `validate_env.sh` checks required/non-empty variables, duplicate keys, unresolved placeholders, matching `ENV`, ports (1–65535), positive counts/TTLs, non-negative `REDIS_DB`, booleans, public HTTP(S) URLs, basic image references/digests. Errors name variables without printing their values. Connectivity and credentials are checked by the running services and smoke tests.
-- `validate_repo.sh` generates and validates all three environments with dummy CI secrets, and rejects real credentials in remote environment inputs.
+- `env.sh` checks required/non-empty variables, duplicate keys, unresolved placeholders, matching `ENV`, ports (1–65535), positive counts/TTLs, non-negative `REDIS_DB`, booleans, public HTTP(S) URLs, basic image references/digests. Errors name variables without printing their values. Connectivity and credentials are checked by the running services and smoke tests.
+- `check_repo.sh` generates and validates all three environments with dummy CI secrets, and rejects real credentials in remote environment inputs.
 - `deploy.sh` validates `.env.<env>` against the contract before deploying, then consumes that file as its only runtime source of truth.
 - `environments/*.config.env` and `environments/*manifest.env` are **auxiliary build inputs** used to construct final `.env` files.
 - Real secrets are never committed. Local uses development-only defaults; remote placeholders (`SECRET_IN_GITHUB_ENV`) are replaced from CI secrets.
