@@ -1,263 +1,156 @@
 #!/usr/bin/env bash
-# Exercise the API user journey, creating and cleaning up test data.
-# Runs on: Machine running the target containers.
-# Called by: Operator explicitly; not part of automatic deployment.
-# Calls: No other repository scripts.
-# Usage: ./scripts/checks/user_flow.sh <local|staging|production>
+# Exercise registration and the API user journey with a fresh test email.
+# Runs on: Machine running the target containers; requires curl and jq.
+# Called by: Operator explicitly; prompts for the registration code received by email.
+# Calls: No other repository scripts. Removes created resources/account on exit.
+# Usage: ./scripts/checks/user_flow.sh <local|staging|production> <test-email>
 
 set -euo pipefail
 
-# ── Helpers ──────────────────────────────────────────────────
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-
-pass() { echo -e "  ${GREEN}✔${NC} $1"; }
-fail() { echo -e "  ${RED}✘${NC} $1"; FAILURES=$((FAILURES + 1)); }
-step() { echo -e "\n${CYAN}── $1${NC}"; }
-
-FAILURES=0
-
-# ── Validate arguments ──────────────────────────────────────
+# ── Validate arguments ───────────────────────────────────────────────
 ENV="${1:-}"
-
-if [[ -z "$ENV" ]]; then
-  echo "Usage: $0 <environment>"
-  echo "  environment: local | staging | production"
+EMAIL="${2:-}"
+if [[ $# -ne 2 || -z "$EMAIL" ]]; then
+  echo "Usage: $0 <local|staging|production> <fresh-test-email>"
   exit 1
 fi
-
 case "$ENV" in
   local|staging|production) ;;
-  *)
-    echo "ERROR: unknown environment '$ENV'. Use 'local', 'staging', or 'production'."
-    exit 1
-    ;;
+  *) echo "ERROR: unknown environment '$ENV'" >&2; exit 1 ;;
 esac
+command -v jq >/dev/null || { echo 'ERROR: jq is required' >&2; exit 1; }
 
-# ── Load env file ───────────────────────────────────────────
+# ── Load environment ─────────────────────────────────────────────────
 INFRA_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_FILE="${INFRA_DIR}/.env.${ENV}"
-
-if [[ ! -f "$ENV_FILE" ]]; then
-  echo "ERROR: $ENV_FILE not found."
-  exit 1
-fi
-
-# Let Compose read the same values used by the containers.
 ENV_VALUES="$(docker compose --project-directory "$INFRA_DIR" --env-file "$ENV_FILE" config --environment)"
 while IFS='=' read -r key value; do
-  export "$key=$value"
+  [[ "$key" != BACKEND_PORT ]] || BACKEND_PORT="$value"
 done <<< "$ENV_VALUES"
 unset ENV_VALUES
+ORIGIN="http://localhost:${BACKEND_PORT:?BACKEND_PORT is required}"
+BASE_URL="$ORIGIN/v1"
 
-BASE_URL="http://localhost:${BACKEND_PORT}/v1"
-TIMESTAMP=$(date +%s)
-EMAIL="flow-${TIMESTAMP}@test.ductifact.dev"
+# ── Prepare temporary files ──────────────────────────────────────────
+umask 077
+WORK_DIR="$(mktemp -d)"
+RESPONSE_FILE="$WORK_DIR/response.json"
+AUTH_HEADERS=()
+CREATED_PATHS=()
+TOKEN=""
 
-echo ""
-echo "=== Full user-flow test for '$ENV' ==="
-echo "    Base URL: $BASE_URL"
-echo "    User:     $EMAIL"
-
-# ── Helper: make API calls and extract fields ───────────────
-
-# json_field extracts a field from a JSON string.
-# Usage: json_field '{"id":"abc"}' "id" → abc
-json_field() {
-  echo "$1" | grep -o "\"$2\":\"[^\"]*\"" | head -1 | cut -d'"' -f4
-}
-
-# assert_status checks the HTTP status code.
-# Usage: assert_status "$RESPONSE" 201 "create client"
-assert_status() {
-  local status="$1" expected="$2" label="$3"
-  if [[ "$status" == "$expected" ]]; then
-    pass "$label → $status"
-  else
-    fail "$label → expected $expected, got $status"
+# ── Helper: clean up test resources ──────────────────────────────────
+# Clean up only resources created by this run, in reverse dependency order.
+cleanup() {
+  local result=$? index status path
+  trap - EXIT
+  if [[ -n "$TOKEN" ]]; then
+    for ((index = ${#CREATED_PATHS[@]} - 1; index >= 0; index--)); do
+      path="${CREATED_PATHS[index]}"
+      status=$(curl -sS --connect-timeout 5 --max-time 20 -o /dev/null -w '%{http_code}' \
+        -X DELETE "${AUTH_HEADERS[@]}" "$BASE_URL$path") || status=000
+      if [[ "$status" != 204 && "$status" != 404 ]]; then
+        echo "ERROR: cleanup failed for $path (HTTP $status)" >&2
+        result=1
+      fi
+    done
+    status=$(curl -sS --connect-timeout 5 --max-time 20 -o /dev/null -w '%{http_code}' \
+      -X DELETE "${AUTH_HEADERS[@]}" "$BASE_URL/users/me?cascade=true") || status=000
+    if [[ "$status" != 200 ]]; then
+      echo "ERROR: test account cleanup failed (HTTP $status); check $EMAIL" >&2
+      result=1
+    fi
   fi
+  rm -rf "$WORK_DIR"
+  exit "$result"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# ── Helpers: HTTP requests and JSON responses ────────────────────────
+# Keep HTTP status and JSON body separate. A failed prerequisite stops the flow.
+request() {
+  local method="$1" url="$2" expected="$3" status
+  shift 3
+  status=$(curl -sS --connect-timeout 5 --max-time 20 -o "$RESPONSE_FILE" -w '%{http_code}' \
+    -X "$method" "${AUTH_HEADERS[@]}" "$@" "$url") || {
+      echo "ERROR: $method request failed" >&2
+      return 1
+    }
+  if [[ "$status" != "$expected" ]]; then
+    echo "ERROR: $method $url expected HTTP $expected, received $status" >&2
+    return 1
+  fi
+  echo "PASS: $method $url (HTTP $status)"
 }
 
-# ── 1. Register ─────────────────────────────────────────────
-step "1. Register user"
+field() {
+  jq -er --arg key "$1" '.[$key] | select(type == "string" and length > 0)' "$RESPONSE_FILE"
+}
 
-REGISTER_RESPONSE=$(curl -sf -w "\n%{http_code}" -X POST "$BASE_URL/auth/register" \
-  -H "Content-Type: application/json" \
-  -d "{\"name\":\"Flow Test User\",\"email\":\"$EMAIL\",\"password\":\"securepass123\"}" 2>&1) || true
+create_json() {
+  request POST "$BASE_URL$1" 201 -H 'Content-Type: application/json' -d "$2"
+}
 
-REGISTER_STATUS=$(echo "$REGISTER_RESPONSE" | tail -1)
-REGISTER_BODY=$(echo "$REGISTER_RESPONSE" | sed '$d')
-assert_status "$REGISTER_STATUS" "201" "Register user"
+remember_resource() {
+  local collection="$1"
+  RESOURCE_ID=$(field id)
+  CREATED_PATHS+=("$collection/$RESOURCE_ID")
+}
 
-TOKEN=$(json_field "$REGISTER_BODY" "access_token")
-if [[ -z "$TOKEN" ]]; then
-  echo -e "${RED}FATAL: No token obtained. Cannot continue.${NC}"
-  exit 1
-fi
-pass "Token obtained"
+# ── 1. Register and verify the test account ──────────────────────────
+# Registration now has two steps. Use an inbox you can read (or a local SMTP inbox).
+request POST "$BASE_URL/auth/register" 200 -H 'Content-Type: application/json' \
+  -d "$(jq -n --arg email "$EMAIL" '{email: $email}')"
+read -rp "Registration code sent to $EMAIL: " REGISTRATION_CODE
+TEST_PASSWORD="Flow-${RANDOM}-${RANDOM}-aA9!"
+create_json /auth/register/verify "$(jq -n --arg email "$EMAIL" --arg code "$REGISTRATION_CODE" \
+  --arg password "$TEST_PASSWORD" '{email: $email, code: $code, name: "Flow Test User", password: $password}')"
+TOKEN=$(field access_token)
+AUTH_HEADERS=(-H "Authorization: Bearer $TOKEN")
 
-# Authenticated curl shortcut
-auth_get()  { curl -sf -w "\n%{http_code}" -H "Authorization: Bearer $TOKEN" "$1" 2>&1 || true; }
-auth_post() { curl -sf -w "\n%{http_code}" -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$2" "$1" 2>&1 || true; }
-auth_del()  { curl -sf -w "\n%{http_code}" -X DELETE -H "Authorization: Bearer $TOKEN" "$1" 2>&1 || true; }
+# ── 2. Create client ─────────────────────────────────────────────────
+create_json /clients '{"name":"Flow Test Client","phone":"+34 600 000 001","email":"client@flow.test","description":"Created by user_flow.sh"}'
+remember_resource /clients
+CLIENT_ID="$RESOURCE_ID"
 
-# ── 2. Create client ────────────────────────────────────────
-step "2. Create client"
+# ── 3. Create project ────────────────────────────────────────────────
+create_json "/clients/$CLIENT_ID/projects" '{"name":"Flow Test Project","address":"Test address","manager_name":"Flow Manager"}'
+remember_resource /projects
+PROJECT_ID="$RESOURCE_ID"
 
-CLIENT_RESPONSE=$(auth_post "$BASE_URL/clients" \
-  '{"name":"Flow Test Client","phone":"+34 600 000 001","email":"client@flow.test","description":"Created by user_flow.sh"}')
+# ── 4. Create piece definition with image ────────────────────────────
+# A small PNG fixture, removed together with the response file on exit.
+PNG_FILE="$WORK_DIR/image.png"
+printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==' | base64 -d > "$PNG_FILE"
+request POST "$BASE_URL/piece-definitions" 201 \
+  -F 'data={"name":"Flow Rectangle","dimension_schema":["Length","Width"]}' \
+  -F "image=@${PNG_FILE};type=image/png"
+remember_resource /piece-definitions
+PIECEDEF_ID="$RESOURCE_ID"
+IMAGE_URL=$(field image_url)
+THUMBNAIL_URL=$(field thumbnail_url)
+# ── 5. Verify images through the file proxy ──────────────────────────
+for path in "$IMAGE_URL" "$THUMBNAIL_URL"; do
+  [[ "$path" == /v1/files/* ]] || { echo 'ERROR: unexpected file proxy path' >&2; exit 1; }
+  request GET "$ORIGIN$path" 200
+done
 
-CLIENT_STATUS=$(echo "$CLIENT_RESPONSE" | tail -1)
-CLIENT_BODY=$(echo "$CLIENT_RESPONSE" | sed '$d')
-assert_status "$CLIENT_STATUS" "201" "Create client"
+# ── 6. Create order ──────────────────────────────────────────────────
+create_json "/projects/$PROJECT_ID/orders" '{"title":"Flow Test Order"}'
+remember_resource /orders
+ORDER_ID="$RESOURCE_ID"
 
-CLIENT_ID=$(json_field "$CLIENT_BODY" "id")
-pass "Client ID: $CLIENT_ID"
+# ── 7. Create piece ──────────────────────────────────────────────────
+create_json "/orders/$ORDER_ID/pieces" "$(jq -n --arg definition "$PIECEDEF_ID" \
+  '{title: "Side Panel", definition_id: $definition, dimensions: {Length: 150.5, Width: 80}, quantity: 10}')"
+remember_resource "/orders/$ORDER_ID/pieces"
 
-# ── 3. Create project ───────────────────────────────────────
-step "3. Create project under client"
+# ── 8. Verify created resources ──────────────────────────────────────
+for path in "${CREATED_PATHS[@]}"; do
+  request GET "$BASE_URL$path" 200
+done
 
-PROJECT_RESPONSE=$(auth_post "$BASE_URL/clients/$CLIENT_ID/projects" \
-  '{"name":"Flow Test Project","address":"Calle Test 1","manager_name":"Flow Manager","description":"Created by user_flow.sh"}')
-
-PROJECT_STATUS=$(echo "$PROJECT_RESPONSE" | tail -1)
-PROJECT_BODY=$(echo "$PROJECT_RESPONSE" | sed '$d')
-assert_status "$PROJECT_STATUS" "201" "Create project"
-
-PROJECT_ID=$(json_field "$PROJECT_BODY" "id")
-pass "Project ID: $PROJECT_ID"
-
-# ── 4. Create piece definition with image ───────────────────
-step "4. Create piece definition with image"
-
-# Minimal valid 1×1 PNG (base64-encoded to avoid shell byte-mangling)
-PNG_FILE=$(mktemp /tmp/flow-test-XXXXXX.png)
-echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==" \
-  | base64 -d > "$PNG_FILE"
-
-PIECEDEF_RESPONSE=$(curl -sf -w "\n%{http_code}" -X POST \
-  -H "Authorization: Bearer $TOKEN" \
-  -F "data={\"name\":\"Flow Rectangle\",\"dimension_schema\":[\"Length\",\"Width\"]}" \
-  -F "image=@${PNG_FILE};type=image/png" \
-  "$BASE_URL/piece-definitions" 2>&1) || true
-
-rm -f "$PNG_FILE"
-
-PIECEDEF_STATUS=$(echo "$PIECEDEF_RESPONSE" | tail -1)
-PIECEDEF_BODY=$(echo "$PIECEDEF_RESPONSE" | sed '$d')
-assert_status "$PIECEDEF_STATUS" "201" "Create piece definition"
-
-PIECEDEF_ID=$(json_field "$PIECEDEF_BODY" "id")
-IMAGE_URL=$(json_field "$PIECEDEF_BODY" "image_url")
-THUMBNAIL_URL=$(json_field "$PIECEDEF_BODY" "thumbnail_url")
-pass "Piece Definition ID: $PIECEDEF_ID"
-
-if [[ -n "$IMAGE_URL" ]]; then
-  pass "image_url is set: $IMAGE_URL"
-else
-  fail "image_url is empty"
-fi
-
-if [[ -n "$THUMBNAIL_URL" ]]; then
-  pass "thumbnail_url is set: $THUMBNAIL_URL"
-else
-  fail "thumbnail_url is empty"
-fi
-
-# ── 5. Verify image served via file proxy ────────────────────
-step "5. Verify image via file proxy"
-
-if [[ -n "$IMAGE_URL" ]]; then
-  # IMAGE_URL is a path like /v1/files/piece-definitions/uuid/original.png
-  PROXY_BASE="http://localhost:${BACKEND_PORT}"
-  IMG_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${PROXY_BASE}${IMAGE_URL}" 2>&1)
-  assert_status "$IMG_STATUS" "200" "GET original image"
-
-  THUMB_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${PROXY_BASE}${THUMBNAIL_URL}" 2>&1)
-  assert_status "$THUMB_STATUS" "200" "GET thumbnail image"
-else
-  fail "Skipped — no image URL"
-fi
-
-# ── 6. Create order ─────────────────────────────────────────
-step "6. Create order under project"
-
-ORDER_RESPONSE=$(auth_post "$BASE_URL/projects/$PROJECT_ID/orders" \
-  '{"title":"Flow Test Order – lot 1"}')
-
-ORDER_STATUS=$(echo "$ORDER_RESPONSE" | tail -1)
-ORDER_BODY=$(echo "$ORDER_RESPONSE" | sed '$d')
-assert_status "$ORDER_STATUS" "201" "Create order"
-
-ORDER_ID=$(json_field "$ORDER_BODY" "id")
-pass "Order ID: $ORDER_ID"
-
-# ── 7. Create piece ─────────────────────────────────────────
-step "7. Create piece in order"
-
-PIECE_RESPONSE=$(auth_post "$BASE_URL/orders/$ORDER_ID/pieces" \
-  "{\"title\":\"Side Panel\",\"definition_id\":\"$PIECEDEF_ID\",\"dimensions\":{\"Length\":150.5,\"Width\":80.0},\"quantity\":10}")
-
-PIECE_STATUS=$(echo "$PIECE_RESPONSE" | tail -1)
-PIECE_BODY=$(echo "$PIECE_RESPONSE" | sed '$d')
-assert_status "$PIECE_STATUS" "201" "Create piece"
-
-PIECE_ID=$(json_field "$PIECE_BODY" "id")
-pass "Piece ID: $PIECE_ID"
-
-# ── 8. Verify everything is retrievable ──────────────────────
-step "8. Verify resources are retrievable"
-
-GET_CLIENT=$(auth_get "$BASE_URL/clients/$CLIENT_ID")
-assert_status "$(echo "$GET_CLIENT" | tail -1)" "200" "GET client"
-
-GET_PROJECT=$(auth_get "$BASE_URL/projects/$PROJECT_ID")
-assert_status "$(echo "$GET_PROJECT" | tail -1)" "200" "GET project"
-
-GET_ORDER=$(auth_get "$BASE_URL/orders/$ORDER_ID")
-assert_status "$(echo "$GET_ORDER" | tail -1)" "200" "GET order"
-
-GET_PIECE=$(auth_get "$BASE_URL/orders/$ORDER_ID/pieces/$PIECE_ID")
-assert_status "$(echo "$GET_PIECE" | tail -1)" "200" "GET piece"
-
-GET_PIECEDEF=$(auth_get "$BASE_URL/piece-definitions/$PIECEDEF_ID")
-assert_status "$(echo "$GET_PIECEDEF" | tail -1)" "200" "GET piece definition"
-
-# ── 9. Cleanup ───────────────────────────────────────────────
-step "9. Cleanup — delete created resources"
-
-DEL_PIECE=$(auth_del "$BASE_URL/orders/$ORDER_ID/pieces/$PIECE_ID")
-assert_status "$(echo "$DEL_PIECE" | tail -1)" "204" "DELETE piece"
-
-DEL_ORDER=$(auth_del "$BASE_URL/orders/$ORDER_ID")
-assert_status "$(echo "$DEL_ORDER" | tail -1)" "204" "DELETE order"
-
-DEL_PIECEDEF=$(auth_del "$BASE_URL/piece-definitions/$PIECEDEF_ID")
-assert_status "$(echo "$DEL_PIECEDEF" | tail -1)" "204" "DELETE piece definition"
-
-DEL_PROJECT=$(auth_del "$BASE_URL/projects/$PROJECT_ID")
-assert_status "$(echo "$DEL_PROJECT" | tail -1)" "204" "DELETE project"
-
-DEL_CLIENT=$(auth_del "$BASE_URL/clients/$CLIENT_ID")
-assert_status "$(echo "$DEL_CLIENT" | tail -1)" "204" "DELETE client"
-
-# Verify image is gone after piece def deletion
-if [[ -n "$IMAGE_URL" ]]; then
-  PROXY_BASE="http://localhost:${BACKEND_PORT}"
-  GONE_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${PROXY_BASE}${IMAGE_URL}" 2>&1)
-  assert_status "$GONE_STATUS" "404" "Image cleaned up after delete"
-fi
-
-# ── Summary ─────────────────────────────────────────────────
-echo ""
-if [[ $FAILURES -eq 0 ]]; then
-  echo -e "${GREEN}=== Full flow test passed (0 failures) ===${NC}"
-  echo ""
-  exit 0
-else
-  echo -e "${RED}=== ${FAILURES} step(s) failed ===${NC}"
-  echo ""
-  exit 1
-fi
+# ── Summary and automatic cleanup ────────────────────────────────────
+echo 'API flow checks passed. Removing test resources and account...'

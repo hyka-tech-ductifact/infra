@@ -11,7 +11,7 @@ set -euo pipefail
 ENV="${1:-}"
 ACTION="${2:-deploy}"
 
-if [[ -z "$ENV" ]]; then
+if [[ $# -lt 1 || $# -gt 2 ]]; then
   echo "Usage: $0 <environment> [stop]"
   echo "  environment: local | staging | production"
   exit 1
@@ -54,6 +54,10 @@ if [[ "$ACTION" == "stop" ]]; then
 fi
 
 # ── Deploy ───────────────────────────────────────────────────
+command -v jq >/dev/null || {
+  echo "ERROR: jq is required by the post-deploy health checks. Install it before deploying." >&2
+  exit 1
+}
 CONTAINER_BACKEND="ductifact_${ENV}_backend"
 CONTAINER_FRONTEND="ductifact_${ENV}_frontend"
 
@@ -65,49 +69,21 @@ if ! "${SCRIPT_DIR}/../checks/env.sh" "$ENV"; then
 fi
 echo ""
 
-# ── Pull latest infra config (skip for local) ────────────────
-if [[ "$ENV" != "local" ]]; then
-  echo "Pulling latest infra config..."
-  git pull --ff-only origin main
-fi
+# ── Check Compose configuration and pull images ──────────────────────
+# CI updates the checkout before invoking this script. Manual deploys use the
+# current checkout, so validation and deployment see the same configuration.
+COMPOSE=(docker compose --env-file "$ENV_FILE")
+"${COMPOSE[@]}" config --quiet
 
-echo "Reading deployment variables from $ENV_FILE"
-BACKEND_IMAGE=$(grep -E '^BACKEND_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
-FRONTEND_IMAGE=$(grep -E '^FRONTEND_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
-POSTGRES_IMAGE=$(grep -E '^POSTGRES_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
-S3_IMAGE=$(grep -E '^S3_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
-REDIS_IMAGE=$(grep -E '^REDIS_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
-PROMETHEUS_IMAGE=$(grep -E '^PROMETHEUS_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
-GRAFANA_IMAGE=$(grep -E '^GRAFANA_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
-RELEASE_VERSION=$(grep -E '^RELEASE_VERSION=' "$ENV_FILE" | cut -d'=' -f2- || true)
-
-# Export so docker compose can use them (overrides .env.<env> values)
-export BACKEND_IMAGE
-export FRONTEND_IMAGE
-export POSTGRES_IMAGE
-export S3_IMAGE
-export REDIS_IMAGE
-export PROMETHEUS_IMAGE
-export GRAFANA_IMAGE
-export RELEASE_VERSION="${RELEASE_VERSION:-unknown}"
-
-echo "=== Deploying $ENV ==="
-echo "Backend:   $BACKEND_IMAGE"
-echo "Frontend:  $FRONTEND_IMAGE"
-echo "Release:   $RELEASE_VERSION"
-echo "Env file:  $ENV_FILE"
-echo "Directory: $INFRA_DIR"
-
-# ── Pull Docker images (skip for local) ──────────────────────
-if [[ "$ENV" != "local" ]]; then
-  echo "Pulling images..."
-  docker pull "$BACKEND_IMAGE" || echo "⚠ Backend image not found — skipping pull"
-  docker pull "$FRONTEND_IMAGE" || echo "⚠ Frontend image not found — skipping pull"
+echo "=== Deploying $ENV using $ENV_FILE ==="
+if [[ "$ENV" != local ]]; then
+  # A failed pull must stop deployment instead of silently using an old image.
+  "${COMPOSE[@]}" pull
 fi
 
 # ── Restart containers ───────────────────────────────────────
 echo "Restarting containers..."
-docker compose --env-file "$ENV_FILE" up -d --remove-orphans
+"${COMPOSE[@]}" up -d --remove-orphans
 
 # ── Verify containers are running ────────────────────────────
 echo "Waiting for containers to start..."
@@ -121,9 +97,6 @@ for CONTAINER in "$CONTAINER_BACKEND" "$CONTAINER_FRONTEND"; do
   fi
   echo "✅ $CONTAINER is running"
 done
-
-# ── Cleanup ──────────────────────────────────────────────────
-docker image prune -f
 
 # ── Post-deploy smoke tests ──────────────────────────────────
 echo "Running post-deploy smoke tests..."

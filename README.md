@@ -114,9 +114,10 @@ git push origin main
 
 ## Setup
 
-Generation and runtime validation use Bash and awk. Deployment requires Docker
-with Compose v2 supporting `config --environment`. Python remains used only by
-the existing repository checks for JSON/YAML files in CI.
+Generation and runtime validation use Bash 4.4+ and standard system utilities. Deployment requires Docker
+with Compose v2 supporting `config --environment`. `jq` is required for the
+health/user-flow checks and repository JSON checks. Python/PyYAML remains used
+only for repository YAML checks in CI.
 
 ### Local deployment
 
@@ -180,7 +181,9 @@ For scripts/CI, `--output PATH` chooses a different output destination:
 ```
 
 On the server, `./scripts/ops/deploy.sh staging` or `production` deploys the final
-file already installed by CI. It does not regenerate configuration.
+file already installed by CI, using the current checkout. For manual server
+updates, run `git pull --ff-only origin main` before deploying. CI performs that
+update before invoking the deploy script. Deployment does not regenerate configuration.
 
 ## Required Secrets (GitHub)
 

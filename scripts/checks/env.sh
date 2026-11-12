@@ -7,6 +7,7 @@
 
 set -euo pipefail
 
+# ── Validate arguments and input files ───────────────────────────────
 INFRA_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV="${1:-}"
 case "$ENV" in
@@ -23,59 +24,130 @@ for file in "$CONTRACT_FILE" "$ACTUAL_FILE"; do
   [[ -f "$file" ]] || { echo "ERROR: file not found: $file"; exit 1; }
 done
 
-# Only inspect scalar values. Never source the file or print its values.
-awk -v environment="$ENV" '
-function fail(key, message) {
-  print "ERROR: " key ": " message > "/dev/stderr"
-  failures++
-}
-NR == FNR {
-  if ($0 ~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
-    split($0, entry, "=")
-    required[entry[1]] = 1
-  }
-  next
-}
-/^[[:space:]]*($|#)/ { next }
-{
-  if (!match($0, /^[A-Za-z_][A-Za-z0-9_]*=/)) {
-    fail("line " FNR, "expected KEY=VALUE")
-    next
-  }
-  key = substr($0, 1, RLENGTH - 1)
-  value = substr($0, RLENGTH + 1)
-  if (seen[key]++) fail(key, "duplicate variable")
-  sub(/[ \t]+#.*/, "", value)
-  gsub(/^[ \t]+|[ \t]+$/, "", value)
-  quote = substr(value, 1, 1)
-  if ((quote == "\"" || quote == sprintf("%c", 39)) && substr(value, length(value), 1) == quote)
-    value = substr(value, 2, length(value) - 2)
+# ── Helpers: report errors and parse values ──────────────────────────
+# Keep parsing, value checks, and required-key checks separate.
+# This accepts single-line KEY=VALUE entries; it never executes their contents.
+declare -A values=()
+failures=0
 
-  if (value ~ /^[ \t]*$/) fail(key, "must not be empty")
-  else if (value ~ /SECRET_IN_GITHUB_ENV|CHANGE_ME/)
-    fail(key, "unresolved placeholder")
-  else if (key == "ENV" && value != environment) fail(key, "does not match " environment)
-  else if (key ~ /_PORT$/) {
-    if (value !~ /^[0-9]+$/ || length(value) > 5 || value + 0 < 1 || value + 0 > 65535)
-      fail(key, "must be a port between 1 and 65535")
-  } else if (key ~ /_SECONDS$|_MAX$|_MAX_ATTEMPTS$/ || key == "REDIS_DB") {
-    if (value !~ /^[0-9]+$/ || length(value) > 12 || value + 0 < (key == "REDIS_DB" ? 0 : 1))
-      fail(key, "must be a positive integer (REDIS_DB also allows zero)")
-  } else if (key == "SMTP_AUTH" || key == "REDIS_AUTH") {
-    if (value != "true" && value != "false") fail(key, "must be true or false")
-  } else if (key == "PUBLIC_BACKEND_URL" || key == "PUBLIC_FILE_STORAGE_URL") {
-    if (value !~ /^https?:\/\/[^/[:space:]]+(\/[^[:space:]]*)?$/) fail(key, "must be an absolute http(s) URL")
-  } else if (key ~ /_IMAGE$/) {
-    if (value !~ /^[A-Za-z0-9][A-Za-z0-9._\/:@-]*$/) fail(key, "invalid image reference")
-    if (index(value, "@")) {
-      split(value, image, "@sha256:")
-      if (length(image[2]) != 64 || image[2] ~ /[^a-fA-F0-9]/) fail(key, "invalid sha256 digest")
-    }
-  }
+fail() {
+  printf 'ERROR: %s: %s\n' "$1" "$2" >&2
+  failures=$((failures + 1))
 }
-END {
-  for (key in required) if (!(key in seen)) fail(key, "missing required variable")
-  if (failures) exit 1
-  print "All env checks passed (" environment ")."
+
+trim() {
+  REPLY="${1#"${1%%[![:blank:]]*}"}"
+  REPLY="${REPLY%"${REPLY##*[![:blank:]]}"}"
 }
-' "$CONTRACT_FILE" "$ACTUAL_FILE"
+
+parse_value() {
+  local text="$1" quote character suffix index
+  trim "$text"
+  text="$REPLY"
+  quote="${text:0:1}"
+
+  if [[ "$quote" != "'" && "$quote" != '"' ]]; then
+    # Only whitespace followed by # starts an unquoted inline comment.
+    text="${text%%[[:blank:]]#*}"
+    trim "$text"
+    return 0
+  fi
+
+  # Find the closing quote without treating an escaped quote as the end.
+  for ((index = 1; index < ${#text}; index++)); do
+    character="${text:index:1}"
+    if [[ "$character" == \\ ]]; then
+      index=$((index + 1))
+    elif [[ "$character" == "$quote" ]]; then
+      suffix="${text:index+1}"
+      trim "$suffix"
+      [[ -z "$REPLY" || "$REPLY" == \#* ]] || return 1
+      REPLY="${text:1:index-1}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# ── Helpers: validate variable values ────────────────────────────────
+is_integer() {
+  [[ "$1" =~ ^[0-9]+$ && ${#1} -le 12 ]]
+}
+
+check_value() {
+  local key="$1" value="$2"
+  if [[ ! "$value" =~ [^[:blank:]] ]]; then
+    fail "$key" 'must not be empty'
+    return
+  fi
+  if [[ "$value" == *SECRET_IN_GITHUB_ENV* || "$value" == *CHANGE_ME* ]]; then
+    fail "$key" 'unresolved placeholder'
+    return
+  fi
+
+  case "$key" in
+    ENV)
+      [[ "$value" == "$ENV" ]] || fail "$key" "must match $ENV"
+      ;;
+    *_PORT)
+      if ! is_integer "$value" || ((10#$value < 1 || 10#$value > 65535)); then
+        fail "$key" 'must be a port between 1 and 65535'
+      fi
+      ;;
+    *_SECONDS|*_MAX|*_MAX_ATTEMPTS)
+      if ! is_integer "$value" || ((10#$value < 1)); then
+        fail "$key" 'must be a positive integer'
+      fi
+      ;;
+    REDIS_DB)
+      is_integer "$value" || fail "$key" 'must be a non-negative integer'
+      ;;
+    SMTP_AUTH|REDIS_AUTH)
+      [[ "$value" == true || "$value" == false ]] || fail "$key" 'must be true or false'
+      ;;
+    PUBLIC_BACKEND_URL|PUBLIC_FILE_STORAGE_URL)
+      [[ "$value" =~ ^https?://[^/[:space:]]+(/[^[:space:]]*)?$ ]] || fail "$key" 'must be an absolute http(s) URL'
+      ;;
+    *_IMAGE)
+      [[ "$value" =~ ^[a-zA-Z0-9][a-zA-Z0-9._/:@-]*$ ]] || fail "$key" 'invalid image reference'
+      if [[ "$value" == *@* && ! "$value" =~ ^[^@]+@sha256:[a-fA-F0-9]{64}$ ]]; then
+        fail "$key" 'invalid sha256 digest'
+      fi
+      ;;
+  esac
+}
+
+# ── Read and validate runtime variables ──────────────────────────────
+line_number=0
+while IFS= read -r line || [[ -n "$line" ]]; do
+  line_number=$((line_number + 1))
+  line="${line%$'\r'}"
+  [[ "$line" =~ ^[[:blank:]]*(#|$) ]] && continue
+  if [[ ! "$line" =~ ^([a-zA-Z_][a-zA-Z0-9_]*)=(.*)$ ]]; then
+    fail "line $line_number" 'expected KEY=VALUE'
+    continue
+  fi
+  key="${BASH_REMATCH[1]}"
+  raw_value="${BASH_REMATCH[2]}"
+  if [[ -v "values[$key]" ]]; then
+    fail "$key" 'duplicate variable'
+  fi
+  values["$key"]="$raw_value"
+  if parse_value "$raw_value"; then
+    check_value "$key" "$REPLY"
+  else
+    fail "$key" 'unclosed quote or unexpected text after quoted value'
+  fi
+done < "$ACTUAL_FILE"
+
+# ── Check required variables ─────────────────────────────────────────
+required_count=0
+while IFS='=' read -r key _ || [[ -n "$key" ]]; do
+  [[ "$key" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]] || continue
+  required_count=$((required_count + 1))
+  [[ -v "values[$key]" ]] || fail "$key" 'missing required variable'
+done < "$CONTRACT_FILE"
+((required_count > 0)) || fail '.env.contract' 'contains no required variables'
+# ── Summary ──────────────────────────────────────────────────────────
+((failures == 0)) || exit 1
+printf 'All env checks passed (%s).\n' "$ENV"

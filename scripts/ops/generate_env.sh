@@ -7,6 +7,7 @@
 
 set -euo pipefail
 
+# ── Validate arguments and output path ───────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INFRA_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ENV="${1:-}"
@@ -29,11 +30,17 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ -d "$OUTPUT" || -L "$OUTPUT" ]]; then
+  echo "ERROR: output must be a regular file, not a directory or symlink" >&2
+  exit 1
+fi
+
 if [[ -e "$OUTPUT" && "$FORCE" == false ]]; then
   echo "ERROR: $OUTPUT already exists. Edit it directly, or use --force to replace it with the versioned defaults."
   exit 1
 fi
 
+# ── Locate generation inputs ─────────────────────────────────────────
 INPUTS=(
   "${INFRA_DIR}/environments/${ENV}.config.env"
   "${INFRA_DIR}/environments/${ENV}.manifest.env"
@@ -43,10 +50,12 @@ for file in "${INPUTS[@]}"; do
   [[ -f "$file" ]] || { echo "ERROR: input file not found: $file"; exit 1; }
 done
 
+# ── Prepare temporary output ─────────────────────────────────────────
 umask 077
 TMP_FILE="$(mktemp "${OUTPUT}.XXXXXX")"
 trap 'rm -f "$TMP_FILE"' EXIT
 
+# ── Combine inputs and inject CI secrets ─────────────────────────────
 # Copy inputs as data. Only CI secret placeholders need substitution.
 for file in "${INPUTS[@]}"; do
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -57,9 +66,11 @@ for file in "${INPUTS[@]}"; do
         echo "ERROR: $key needs a non-empty, single-line CI secret" >&2
         exit 1
       fi
-      # Compose single quotes keep $, backticks, spaces and # literal.
-      value="${value//\'/\\\'}"
-      printf "%s='%s'\n" "$key" "$value"
+      # Compose double quotes: escape literal backslashes, quotes and dollars.
+      value="${value//\\/\\\\}"
+      value="${value//\"/\\\"}"
+      value="${value//\$/\\\$}"
+      printf '%s="%s"\n' "$key" "$value"
     else
       printf '%s\n' "$line"
     fi
@@ -67,6 +78,7 @@ for file in "${INPUTS[@]}"; do
   printf '\n'
 done > "$TMP_FILE"
 
+# ── Validate and publish the runtime file ────────────────────────────
 "${SCRIPT_DIR}/../checks/env.sh" "$ENV" --file "$TMP_FILE"
 if [[ "$FORCE" == true ]]; then
   mv -f "$TMP_FILE" "$OUTPUT"

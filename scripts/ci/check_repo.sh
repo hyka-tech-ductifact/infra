@@ -7,6 +7,9 @@
 
 set -euo pipefail
 
+command -v jq >/dev/null || { echo "ERROR: jq is required for JSON validation" >&2; exit 1; }
+
+# ── Helpers: report validation results ───────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
@@ -24,20 +27,7 @@ echo ""
 echo "=== validate_repo ==="
 echo ""
 
-# ── 1. docker-compose.yml ────────────────────────────────────
-echo "Docker Compose:"
-
-while IFS= read -r var; do
-  if [[ -z "${!var:-}" ]]; then
-    export "$var=8080"
-  fi
-done < <(grep -oP '\$\{(\w+)' docker-compose.yml | sed 's/\${//' | sort -u)
-
-if docker compose config --quiet 2>/dev/null; then
-  pass "docker-compose.yml is valid"
-else
-  fail "docker-compose.yml has errors"
-fi
+# Compose is checked below with each generated environment, not invented defaults.
 
 # ── 2. Prometheus ─────────────────────────────────────────────
 echo ""
@@ -75,7 +65,7 @@ if [[ -d "$DASHBOARD_DIR" ]]; then
     info "No dashboard JSON files found in $DASHBOARD_DIR"
   else
     for f in "${json_files[@]}"; do
-      if python3 -m json.tool "$f" > /dev/null 2>&1; then
+      if jq empty "$f" > /dev/null 2>&1; then
         pass "$(basename "$f") is valid JSON"
       else
         fail "$(basename "$f") is invalid JSON"
@@ -132,13 +122,13 @@ mapfile -t SECRET_KEYS < <(grep -E '^[A-Z_][A-Z0-9_]*=SECRET_IN_GITHUB_ENV$' "$C
 # Platform image keys: *_IMAGE entries that are NOT local-only (BACKEND_IMAGE, FRONTEND_IMAGE)
 LOCAL_ONLY_IMAGE_KEYS=(BACKEND_IMAGE FRONTEND_IMAGE)
 mapfile -t PLATFORM_IMAGE_KEYS < <(
-  grep -E '^[A-Z_][A-Z0-9_]*_IMAGE=' "$CONTRACT_FILE" | cut -d= -f1 | grep -vFf <(printf '%s\n' "${LOCAL_ONLY_IMAGE_KEYS[@]}")
+  grep -E '^[A-Z_][A-Z0-9_]*_IMAGE=' "$CONTRACT_FILE" | cut -d= -f1 | grep -vxFf <(printf '%s\n' "${LOCAL_ONLY_IMAGE_KEYS[@]}")
 )
 
 # Config keys: all non-comment keys that are not secrets, not images (platform or local-only)
 ALL_EXCLUDE_KEYS=("${SECRET_KEYS[@]}" "${LOCAL_ONLY_IMAGE_KEYS[@]}" "${PLATFORM_IMAGE_KEYS[@]}")
 mapfile -t CONFIG_KEYS < <(
-  grep -E '^[A-Z_][A-Z0-9_]*=' "$CONTRACT_FILE" | cut -d= -f1 | grep -vFf <(printf '%s\n' "${ALL_EXCLUDE_KEYS[@]}")
+  grep -E '^[A-Z_][A-Z0-9_]*=' "$CONTRACT_FILE" | cut -d= -f1 | grep -vxFf <(printf '%s\n' "${ALL_EXCLUDE_KEYS[@]}")
 )
 
 # ── 5. Shared images manifest ─────────────────────────────────
@@ -213,11 +203,12 @@ leaked=0
 while IFS= read -r -d '' file; do
   [[ "$file" == "environments/local.config.env" ]] && continue
   for key in "${SECRET_KEYS[@]}"; do
-    # Match KEY=<anything> where value is NOT SECRET_IN_GITHUB_ENV and NOT empty
-    if grep -qE "^${key}=.+" "$file" && ! grep -qE "^${key}=SECRET_IN_GITHUB_ENV$" "$file"; then
-      fail "$(basename "$file"): $key has a real value — must be SECRET_IN_GITHUB_ENV"
-      leaked=$((leaked + 1))
-    fi
+    while IFS='=' read -r _ value; do
+      if [[ "$value" != SECRET_IN_GITHUB_ENV ]]; then
+        fail "$(basename "$file"): $key must be SECRET_IN_GITHUB_ENV"
+        leaked=$((leaked + 1))
+      fi
+    done < <(grep -E "^${key}=" "$file" || true)
   done
 done < <(find environments/ -type f -name '*.env' -print0)
 
@@ -225,6 +216,7 @@ if [[ "$leaked" -eq 0 ]]; then
   pass "no real secret values found outside local development defaults"
 fi
 
+# ── Generate runtime files and validate Compose ──────────────────────
 # Generate and validate each environment with dummy CI secrets; no SSH or deploy.
 ENV_CHECK_DIR="$(mktemp -d)"
 trap 'rm -rf "$ENV_CHECK_DIR"' EXIT
@@ -233,7 +225,18 @@ for key in "${SECRET_KEYS[@]}"; do
 done
 for environment in local staging production; do
   if ./scripts/ops/generate_env.sh "$environment" --output "${ENV_CHECK_DIR}/.env.${environment}"; then
-    pass "$environment runtime file can be generated and validated"
+    # Compose gives inherited shell variables precedence; check the file itself.
+    if (
+      runtime_file="${ENV_CHECK_DIR}/.env.${environment}"
+      while IFS='=' read -r key _; do
+        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && unset "$key"
+      done < "$runtime_file"
+      docker compose --env-file "$runtime_file" config --quiet
+    ); then
+      pass "$environment runtime file and Compose configuration are valid"
+    else
+      fail "$environment Compose configuration is invalid"
+    fi
   else
     fail "$environment runtime generation failed"
   fi

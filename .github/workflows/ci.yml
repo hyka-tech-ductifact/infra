@@ -15,8 +15,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install shellcheck
-        run: sudo apt-get -qq install -y shellcheck > /dev/null
+      - name: Install validation tools
+        run: sudo apt-get -qq install -y shellcheck jq > /dev/null
 
       - name: Run validation checks
         run: ./scripts/ci/check_repo.sh

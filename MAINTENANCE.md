@@ -61,7 +61,11 @@ crontab -e
 0 3 * * * cd /opt/ductifact && ./scripts/ops/db.sh backup production >> /var/log/ductifact-backup.log 2>&1
 ```
 
-Retention: 7 days (configurable in `db.sh`).
+Retention: 7 days (configurable in `db.sh`). Backups contain a gzip-compressed
+PostgreSQL custom-format archive. A backup becomes visible only after `pg_dump`
+and compression succeed. Restore checks the gzip/archive before dropping the
+database, and stops on the first restore error. If restore fails after stopping
+the backend, the backend stays stopped so you can inspect the database.
 
 ### Database diagnostics
 

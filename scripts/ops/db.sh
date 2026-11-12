@@ -45,7 +45,9 @@ load_env() {
   # Let Compose read the same values used by the containers.
   ENV_VALUES="$(docker compose --project-directory "$INFRA_DIR" --env-file "$ENV_FILE" config --environment)"
   while IFS='=' read -r key value; do
-    export "$key=$value"
+    case "$key" in
+      DB_USER|DB_NAME|BACKUP_DIR) export "$key=$value" ;;
+    esac
   done <<< "$ENV_VALUES"
   unset ENV_VALUES
 
@@ -78,22 +80,24 @@ cmd_backup() {
 
   echo "Creating backup: $BACKUP_FILE"
 
-  docker exec "$CONTAINER" \
-    pg_dump -U "${DB_USER}" --format=custom "${DB_NAME}" \
-    | gzip > "$BACKUP_FILE"
-
-  # Verify the file is not empty
-  if [[ ! -s "$BACKUP_FILE" ]]; then
-    echo "ERROR: backup file is empty, something went wrong."
-    rm -f "$BACKUP_FILE"
+  umask 077
+  PARTIAL_BACKUP="$(mktemp "${BACKUP_DIR}/.backup.XXXXXX")"
+  trap 'rm -f "$PARTIAL_BACKUP"' EXIT
+  if ! docker exec "$CONTAINER" pg_dump -U "$DB_USER" --format=custom "$DB_NAME" | gzip > "$PARTIAL_BACKUP"; then
+    echo "ERROR: backup failed; no completed backup was created." >&2
     exit 1
   fi
+  gzip -t "$PARTIAL_BACKUP"
+  # Do not overwrite another backup created in the same second.
+  ln "$PARTIAL_BACKUP" "$BACKUP_FILE"
+  rm -f "$PARTIAL_BACKUP"
+  trap - EXIT
 
   BACKUP_SIZE="$(du -h "$BACKUP_FILE" | cut -f1)"
   echo "Backup complete: $BACKUP_FILE ($BACKUP_SIZE)"
 
   # Clean old backups
-  DELETED=$(find "$BACKUP_DIR" -name "*.sql.gz" -mtime +"$RETENTION_DAYS" -delete -print | wc -l)
+  DELETED=$(find "$BACKUP_DIR" -maxdepth 1 -type f -name "*.sql.gz" -mtime +"$RETENTION_DAYS" -delete -print | wc -l)
   if [[ "$DELETED" -gt 0 ]]; then
     echo "Cleaned $DELETED backup(s) older than $RETENTION_DAYS days."
   fi
@@ -105,7 +109,8 @@ cmd_restore() {
 
   # Resolve backup file
   if [[ -z "$FILE" ]]; then
-    FILE="$(find "$BACKUP_DIR" -maxdepth 1 -name '*.sql.gz' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)"
+    [[ -d "$BACKUP_DIR" ]] || { echo "ERROR: no backups found in $BACKUP_DIR"; exit 1; }
+    FILE="$(find "$BACKUP_DIR" -maxdepth 1 -name '*.sql.gz' -printf '%T@ %p\n' 2>/dev/null | sort -rn | sed -n '1p' | cut -d' ' -f2-)"
     if [[ -z "$FILE" ]]; then
       echo "ERROR: no backups found in $BACKUP_DIR"
       exit 1
@@ -117,6 +122,11 @@ cmd_restore() {
     echo "ERROR: backup file not found: $FILE"
     exit 1
   fi
+
+  # Reject corrupt gzip/archive data before stopping services or dropping anything.
+  require_container
+  gzip -t "$FILE"
+  gunzip -c "$FILE" | docker exec -i "$CONTAINER" pg_restore --list > /dev/null
 
   # Safety confirmation
   BACKUP_SIZE="$(du -h "$FILE" | cut -f1)"
@@ -149,20 +159,25 @@ cmd_restore() {
     BACKEND_WAS_RUNNING=true
   fi
 
+  # On failure keep the backend stopped rather than expose an incomplete database.
+  trap 'echo "ERROR: restore failed; check the database before restarting the backend." >&2' ERR
+
   # Restore
   echo "Dropping and recreating database '$DB_NAME'..."
 
-  docker exec "$CONTAINER" \
-    psql -U "${DB_USER}" -d postgres \
-    -c "DROP DATABASE IF EXISTS ${DB_NAME};" \
-    -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};"
+  docker exec -i "$CONTAINER" psql -U "$DB_USER" -d postgres \
+    -v ON_ERROR_STOP=1 -v db_name="$DB_NAME" -v db_user="$DB_USER" <<'SQL'
+DROP DATABASE IF EXISTS :"db_name";
+CREATE DATABASE :"db_name" OWNER :"db_user";
+SQL
 
   echo "Restoring from backup..."
 
   gunzip -c "$FILE" \
     | docker exec -i "$CONTAINER" \
-      pg_restore -U "${DB_USER}" -d "${DB_NAME}" --no-owner --no-acl
+      pg_restore -U "${DB_USER}" -d "${DB_NAME}" --no-owner --no-acl --single-transaction --exit-on-error
 
+  trap - ERR
   echo "Restore complete."
 
   # Restart backend if it was running
@@ -202,7 +217,7 @@ cmd_list() {
 COMMAND="${1:-}"
 ENV="${2:-}"
 
-if [[ -z "$COMMAND" ]] || [[ -z "$ENV" ]]; then
+if [[ $# -lt 2 || $# -gt 3 || ( $# -eq 3 && "$COMMAND" != restore ) ]]; then
   usage
 fi
 

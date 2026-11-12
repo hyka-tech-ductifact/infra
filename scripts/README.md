@@ -13,7 +13,7 @@ files relative to their own location, so they can also be invoked by absolute pa
 | Stop an environment | `./scripts/ops/deploy.sh staging stop` | Target server |
 | Validate a runtime file | `./scripts/checks/env.sh local` | Machine containing that file |
 | Diagnose service health | `./scripts/checks/health.sh staging` | Target server |
-| Exercise the API user journey | `./scripts/checks/user_flow.sh local` | Developer machine |
+| Exercise the API user journey | `./scripts/checks/user_flow.sh local fresh-test@example.com` | Developer machine |
 | Create a database backup | `./scripts/ops/db.sh backup production` | Target server; also usable from cron |
 | List backups | `./scripts/ops/db.sh list production` | Target server |
 | Restore a backup | `./scripts/ops/db.sh restore staging /path/to/backup.sql.gz` | Target server |
@@ -21,8 +21,12 @@ files relative to their own location, so they can also be invoked by absolute pa
 
 Commands accepting an environment support `local`, `staging`, and `production`,
 except `ci/deploy_remote.sh`, which supports staging and production only.
-The user-flow check creates application data and attempts cleanup at the end;
-it runs only when explicitly requested, not as part of deployment.
+The user-flow check requires a fresh email address with an inbox you can read.
+It requests a registration code, prompts for that code, then creates a test account
+and application data. Cleanup runs on exit, including failed steps, and removes
+only the resources/account created by this run. It runs only when explicitly
+requested, not as part of deployment. Both HTTP checks require `jq` for JSON.
+Cleanup failures are reported; interrupted networking may still require manual cleanup.
 
 ## Responsibilities and automatic calls
 
@@ -53,6 +57,10 @@ flowchart TD
 
 Running `ops/deploy.sh` includes validation and health checks; you do not need to
 run them separately. Its `stop` action only stops the environment.
+Deployment uses the current checkout, stops if any image pull fails, and does
+not prune images on the host. CI updates the checkout before calling deployment;
+for a manual server update, run `git pull --ff-only origin main` first.
+
 Generation validates the file it creates; deployment validates again because the
 runtime file may have been edited or copied since generation.
 
