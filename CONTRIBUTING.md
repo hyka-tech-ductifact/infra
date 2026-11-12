@@ -2,9 +2,7 @@
 
 ## Workflow overview
 
-This repo **has no versions and no CD pipeline**. Each change is deployed manually after merge — staging first, then production.
-
-This is intentional: infra changes (image upgrades, config tweaks) are infrequent and high-impact, so a human should always be in control.
+Staging deploys through CI when its configured inputs change on `main`. Production promotions require a reviewed PR and create a release after deployment. See [README.md](README.md#environment-files-and-deployment) for the generation and deployment flow.
 
 ---
 
@@ -16,7 +14,7 @@ This is intentional: infra changes (image upgrades, config tweaks) are infrequen
 | `fix/` | Fix broken config, wrong ports | `fix/prometheus-scrape-interval` |
 | `chore/` | Version bumps, CI, docs, cleanup | `chore/upgrade-grafana-12` |
 
-All PRs target `main`. There are no releases, tags, or versions — `main` is always the source of truth and production is updated manually.
+All PRs target `main`. Application promotions are declared in environment manifests; successful production deployments create tags and releases.
 
 ---
 
@@ -36,30 +34,29 @@ CI validates compose syntax, Prometheus config, Grafana dashboards, and deploy s
 
 ---
 
-## 3) Deploy (after merge)
+## 3) Generate and deploy environments
+
+Make persistent configuration/image changes in `environments/`. CI combines those
+inputs with GitHub Environment secrets using `scripts/generate_env.sh`, copies the
+final `.env.staging` or `.env.production` to the server, then runs `deploy.sh`.
+Deploy staging first and validate it before promoting to production.
+
+For local testing, build the images named in `environments/local.manifest.env`,
+then run:
 
 ```bash
-# SSH to the server
-ssh deploy@your-server
-
-cd ~/ductifact/infra
-
-# Always staging first
-./scripts/deploy.sh staging
-# Verify: check logs, health endpoints, Grafana
-
-# Then production
-./scripts/deploy.sh production
-# Verify again
-```
-
-The script reads `BACKEND_IMAGE` and `FRONTEND_IMAGE` from `.env.<environment>`, pulls both images, restarts containers, and verifies they are running.
-
-For **local testing** (no git pull, no docker pull):
-
-```bash
+./scripts/generate_env.sh local
 ./scripts/deploy.sh local
 ```
+
+Edit `.env.local` directly for personal settings. It is ignored by Git, and
+`deploy.sh` does not regenerate it. `generate_env.sh local --force` explicitly
+replaces the entire file with the versioned development defaults.
+`deploy.sh` only consumes the final `.env.<environment>`.
+See [local setup](README.md#local-deployment) for image builds and SMTP setup.
+
+Run `./scripts/validate_repo.sh` before pushing. It generates and validates all
+three environment files with dummy CI secrets, without deploying.
 
 ---
 

@@ -59,8 +59,12 @@ load_env() {
     exit 1
   fi
 
-  # shellcheck source=/dev/null
-  source "$ENV_FILE"
+  # Let Compose read the same values used by the containers.
+  ENV_VALUES="$(docker compose --project-directory "$INFRA_DIR" --env-file "$ENV_FILE" config --environment)"
+  while IFS='=' read -r key value; do
+    export "$key=$value"
+  done <<< "$ENV_VALUES"
+  unset ENV_VALUES
 
   CONTAINER="ductifact_${ENV}_postgres"
   BACKUP_DIR="${BACKUP_DIR:-${HOME}/backups/ductifact}/${ENV}"

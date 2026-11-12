@@ -1,101 +1,77 @@
 #!/usr/bin/env bash
-# validate_env.sh — Validate a runtime env file against .env.contract.
-#
-# Run automatically by deploy.sh before every deploy.
-# Run locally to verify .env.<environment> is complete before deploying.
-#
-# Usage:
-#   ./scripts/validate_env.sh <environment>
-#
-#   environment: local | staging | production
-#
-# What it checks:
-#   - .env.<environment> exists
-#   - Every variable defined in .env.contract is present and non-empty in .env.<environment>
-
+# Basic runtime checks against .env.contract; no connectivity checks.
+# Usage: ./scripts/validate_env.sh <local|staging|production> [--file PATH]
 set -euo pipefail
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-NC='\033[0m'
-
-pass() { echo -e "  ${GREEN}✔${NC} $1"; }
-fail() { echo -e "  ${RED}✘${NC} $1"; FAILURES=$((FAILURES + 1)); }
-
-FAILURES=0
-ENV="${1:-}"
-
-if [[ -z "$ENV" ]]; then
-  echo "Usage: $0 <local|staging|production>"
-  exit 1
-fi
-
-case "$ENV" in
-  local|staging|production) ;;
-  *)
-    echo "ERROR: unknown environment '$ENV'. Use 'local', 'staging', or 'production'."
-    exit 1
-    ;;
-esac
-
 INFRA_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$INFRA_DIR"
-
-CONTRACT_FILE=".env.contract"
-ACTUAL_FILE=".env.${ENV}"
-
-echo ""
-echo "=== validate_env ($ENV) ==="
-echo ""
-
-if [[ ! -f "$CONTRACT_FILE" ]]; then
-  echo "ERROR: $CONTRACT_FILE not found."
-  exit 1
+ENV="${1:-}"
+case "$ENV" in
+  local|staging|production) shift ;;
+  *) echo "Usage: $0 <local|staging|production> [--file PATH]"; exit 1 ;;
+esac
+ACTUAL_FILE="${INFRA_DIR}/.env.${ENV}"
+if [[ $# -gt 0 ]]; then
+  [[ $# -eq 2 && "$1" == --file ]] || { echo "ERROR: expected --file PATH"; exit 1; }
+  ACTUAL_FILE="$2"
 fi
+CONTRACT_FILE="${INFRA_DIR}/.env.contract"
+for file in "$CONTRACT_FILE" "$ACTUAL_FILE"; do
+  [[ -f "$file" ]] || { echo "ERROR: file not found: $file"; exit 1; }
+done
 
-if [[ ! -f "$ACTUAL_FILE" ]]; then
-  fail "$ACTUAL_FILE not found — copy from $CONTRACT_FILE and fill in values"
-  echo ""
-  echo -e "${RED}1 check(s) failed.${NC}"
-  exit 1
-fi
+# Only inspect scalar values. Never source the file or print its values.
+awk -v environment="$ENV" '
+function fail(key, message) {
+  print "ERROR: " key ": " message > "/dev/stderr"
+  failures++
+}
+NR == FNR {
+  if ($0 ~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
+    split($0, entry, "=")
+    required[entry[1]] = 1
+  }
+  next
+}
+/^[[:space:]]*($|#)/ { next }
+{
+  if (!match($0, /^[A-Za-z_][A-Za-z0-9_]*=/)) {
+    fail("line " FNR, "expected KEY=VALUE")
+    next
+  }
+  key = substr($0, 1, RLENGTH - 1)
+  value = substr($0, RLENGTH + 1)
+  if (seen[key]++) fail(key, "duplicate variable")
+  sub(/[ \t]+#.*/, "", value)
+  gsub(/^[ \t]+|[ \t]+$/, "", value)
+  quote = substr(value, 1, 1)
+  if ((quote == "\"" || quote == sprintf("%c", 39)) && substr(value, length(value), 1) == quote)
+    value = substr(value, 2, length(value) - 2)
 
-invalid_lines=$(grep -nEv '^\s*$|^\s*#|^[A-Za-z_][A-Za-z0-9_]*=.*$' "$ACTUAL_FILE" || true)
-if [[ -n "$invalid_lines" ]]; then
-  fail "Invalid lines in $ACTUAL_FILE (must be comments, blank lines, or KEY=VALUE)"
-  echo "$invalid_lines"
-fi
-
-missing_vars=()
-empty_vars=()
-
-while IFS='=' read -r key _; do
-  actual_line=$(grep -E "^${key}=" "$ACTUAL_FILE" 2>/dev/null || true)
-  if [[ -z "$actual_line" ]]; then
-    missing_vars+=("$key")
-  else
-    value="${actual_line#*=}"
-    if [[ -z "$value" ]]; then
-      empty_vars+=("$key")
-    fi
-  fi
-done < <(grep -E '^[A-Z_]+=.' "$CONTRACT_FILE")
-
-if [[ ${#missing_vars[@]} -eq 0 && ${#empty_vars[@]} -eq 0 ]]; then
-  pass "All variables from $CONTRACT_FILE are present and non-empty in $ACTUAL_FILE"
-else
-  if [[ ${#missing_vars[@]} -gt 0 ]]; then
-    fail "Missing in $ACTUAL_FILE: ${missing_vars[*]}"
-  fi
-  if [[ ${#empty_vars[@]} -gt 0 ]]; then
-    fail "Empty in $ACTUAL_FILE: ${empty_vars[*]}"
-  fi
-fi
-
-echo ""
-if [[ "$FAILURES" -eq 0 ]]; then
-  echo -e "${GREEN}All env checks passed.${NC}"
-else
-  echo -e "${RED}${FAILURES} check(s) failed.${NC}"
-  exit 1
-fi
+  if (value ~ /^[ \t]*$/) fail(key, "must not be empty")
+  else if (value ~ /SECRET_IN_GITHUB_ENV|CHANGE_ME/)
+    fail(key, "unresolved placeholder")
+  else if (key == "ENV" && value != environment) fail(key, "does not match " environment)
+  else if (key ~ /_PORT$/) {
+    if (value !~ /^[0-9]+$/ || length(value) > 5 || value + 0 < 1 || value + 0 > 65535)
+      fail(key, "must be a port between 1 and 65535")
+  } else if (key ~ /_SECONDS$|_MAX$|_MAX_ATTEMPTS$/ || key == "REDIS_DB") {
+    if (value !~ /^[0-9]+$/ || length(value) > 12 || value + 0 < (key == "REDIS_DB" ? 0 : 1))
+      fail(key, "must be a positive integer (REDIS_DB also allows zero)")
+  } else if (key == "SMTP_AUTH" || key == "REDIS_AUTH") {
+    if (value != "true" && value != "false") fail(key, "must be true or false")
+  } else if (key == "PUBLIC_BACKEND_URL" || key == "PUBLIC_FILE_STORAGE_URL") {
+    if (value !~ /^https?:\/\/[^/[:space:]]+(\/[^[:space:]]*)?$/) fail(key, "must be an absolute http(s) URL")
+  } else if (key ~ /_IMAGE$/) {
+    if (value !~ /^[A-Za-z0-9][A-Za-z0-9._\/:@-]*$/) fail(key, "invalid image reference")
+    if (index(value, "@")) {
+      split(value, image, "@sha256:")
+      if (length(image[2]) != 64 || image[2] ~ /[^a-fA-F0-9]/) fail(key, "invalid sha256 digest")
+    }
+  }
+}
+END {
+  for (key in required) if (!(key in seen)) fail(key, "missing required variable")
+  if (failures) exit 1
+  print "All env checks passed (" environment ")."
+}
+' "$CONTRACT_FILE" "$ACTUAL_FILE"

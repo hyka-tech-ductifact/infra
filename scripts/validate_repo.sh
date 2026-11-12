@@ -11,7 +11,7 @@
 #   4. ShellCheck on all scripts
 #   5. environments/images.manifest.env — platform image keys derived from .env.contract
 #   6. environments/*.config.env — config + secret keys derived from .env.contract
-#   6b. environments/* — secret whitelist: no key from SECRET_KEYS may have a real value
+#   6b. environments/* — secret placeholders required outside local development defaults
 #   7. environments/production.manifest.env — RELEASE_VERSION present semver
 #
 # .env.contract is the single source of truth for which variables must be defined.
@@ -138,18 +138,18 @@ if [[ ! -f "$CONTRACT_FILE" ]]; then
 fi
 
 # Keys whose value in .env.contract is SECRET_IN_GITHUB_ENV
-mapfile -t SECRET_KEYS < <(grep -E '^[A-Z_]+=SECRET_IN_GITHUB_ENV$' "$CONTRACT_FILE" | cut -d= -f1)
+mapfile -t SECRET_KEYS < <(grep -E '^[A-Z_][A-Z0-9_]*=SECRET_IN_GITHUB_ENV$' "$CONTRACT_FILE" | cut -d= -f1)
 
 # Platform image keys: *_IMAGE entries that are NOT local-only (BACKEND_IMAGE, FRONTEND_IMAGE)
 LOCAL_ONLY_IMAGE_KEYS=(BACKEND_IMAGE FRONTEND_IMAGE)
 mapfile -t PLATFORM_IMAGE_KEYS < <(
-  grep -E '^[A-Z_]+_IMAGE=' "$CONTRACT_FILE" | cut -d= -f1 | grep -vFf <(printf '%s\n' "${LOCAL_ONLY_IMAGE_KEYS[@]}")
+  grep -E '^[A-Z_][A-Z0-9_]*_IMAGE=' "$CONTRACT_FILE" | cut -d= -f1 | grep -vFf <(printf '%s\n' "${LOCAL_ONLY_IMAGE_KEYS[@]}")
 )
 
 # Config keys: all non-comment keys that are not secrets, not images (platform or local-only)
 ALL_EXCLUDE_KEYS=("${SECRET_KEYS[@]}" "${LOCAL_ONLY_IMAGE_KEYS[@]}" "${PLATFORM_IMAGE_KEYS[@]}")
 mapfile -t CONFIG_KEYS < <(
-  grep -E '^[A-Z_]+=' "$CONTRACT_FILE" | cut -d= -f1 | grep -vFf <(printf '%s\n' "${ALL_EXCLUDE_KEYS[@]}")
+  grep -E '^[A-Z_][A-Z0-9_]*=' "$CONTRACT_FILE" | cut -d= -f1 | grep -vFf <(printf '%s\n' "${ALL_EXCLUDE_KEYS[@]}")
 )
 
 # ── 5. Shared images manifest ─────────────────────────────────
@@ -194,7 +194,9 @@ check_config_file() {
   done
 
   for key in "${SECRET_KEYS[@]}"; do
-    if grep -qE "^${key}=SECRET_IN_GITHUB_ENV$" "$file"; then
+    if [[ "$label" == "local.config.env" ]] && grep -qE "^${key}=.+" "$file"; then
+      : # Local-only development credentials are versioned defaults.
+    elif grep -qE "^${key}=SECRET_IN_GITHUB_ENV$" "$file"; then
       : # ok
     elif grep -qE "^${key}=" "$file"; then
       fail "$label: $key must be SECRET_IN_GITHUB_ENV (not a real value)"
@@ -210,6 +212,7 @@ check_config_file() {
   fi
 }
 
+check_config_file "environments/local.config.env"      "local.config.env"
 check_config_file "environments/staging.config.env"    "staging.config.env"
 check_config_file "environments/production.config.env" "production.config.env"
 
@@ -219,6 +222,7 @@ echo "Secret whitelist (environments/*):"
 
 leaked=0
 while IFS= read -r -d '' file; do
+  [[ "$file" == "environments/local.config.env" ]] && continue
   for key in "${SECRET_KEYS[@]}"; do
     # Match KEY=<anything> where value is NOT SECRET_IN_GITHUB_ENV and NOT empty
     if grep -qE "^${key}=.+" "$file" && ! grep -qE "^${key}=SECRET_IN_GITHUB_ENV$" "$file"; then
@@ -229,8 +233,22 @@ while IFS= read -r -d '' file; do
 done < <(find environments/ -type f -name '*.env' -print0)
 
 if [[ "$leaked" -eq 0 ]]; then
-  pass "no secret keys with real values found in environments/"
+  pass "no real secret values found outside local development defaults"
 fi
+
+# Generate and validate each environment with dummy CI secrets; no SSH or deploy.
+ENV_CHECK_DIR="$(mktemp -d)"
+trap 'rm -rf "$ENV_CHECK_DIR"' EXIT
+for key in "${SECRET_KEYS[@]}"; do
+  export "$key=ci-validation-only"
+done
+for environment in local staging production; do
+  if ./scripts/generate_env.sh "$environment" --output "${ENV_CHECK_DIR}/.env.${environment}"; then
+    pass "$environment runtime file can be generated and validated"
+  else
+    fail "$environment runtime generation failed"
+  fi
+done
 
 # ── 7. Production manifest preflight ─────────────────────────
 # Full semver + tag-collision validation is done in deploy-production.yml.

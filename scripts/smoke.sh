@@ -75,10 +75,12 @@ if [[ ! -f "$ENV_FILE" ]]; then
   exit 1
 fi
 
-set -a
-# shellcheck source=/dev/null
-source "$ENV_FILE"
-set +a
+# Let Compose read the same values used by the containers.
+ENV_VALUES="$(docker compose --project-directory "$INFRA_DIR" --env-file "$ENV_FILE" config --environment)"
+while IFS='=' read -r key value; do
+  export "$key=$value"
+done <<< "$ENV_VALUES"
+unset ENV_VALUES
 
 BACKEND_URL="http://localhost:${BACKEND_PORT}"
 FRONTEND_URL="http://localhost:${FRONTEND_PORT}"

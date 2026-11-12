@@ -1,6 +1,6 @@
 # Ductifact — Infrastructure
 
-Infrastructure configuration for the **production** and **staging** environments of Ductifact.
+Infrastructure configuration for the **local**, **staging**, and **production** environments of Ductifact.
 
 This repo is cloned on the server (`~/ductifact/infra/`) and contains everything needed to orchestrate services with Docker Compose.
 
@@ -14,16 +14,17 @@ This repo is cloned on the server (`~/ductifact/infra/`) and contains everything
 │   ├── propose-staging.yml      # Opens auto-merge PR for staging manifest updates
 │   ├── deploy-staging.yml       # Deploys staging when staging manifest changes on main
 │   ├── propose-production.yml   # Opens production promotion PR (manual approval)
-│   ├── deploy-production.yml    # Deploys production when production manifest changes on main
-│   └── _deploy.yml              # Shared deploy workflow (SSH + env sync + deploy script)
-├── docker-compose.yml           # Production/staging compose (single source of truth)
+│   └── deploy-production.yml    # Deploys production when production manifest changes on main
+├── docker-compose.yml           # Shared service topology for all environments
 ├── environments/
+│   ├── local.config.env         # Local config + development-only credentials
+│   ├── local.manifest.env       # Locally built application images
 │   ├── production.manifest.env  # 🎯 Production manifest (image versions)
 │   ├── production.config.env    # Production runtime config + explicit secret placeholders
 │   ├── staging.manifest.env     # Staging manifest (image versions)
 │   ├── staging.config.env       # Staging runtime config + explicit secret placeholders
 │   └── images.manifest.env      # Shared infra/base images (postgres, redis, RustFS (S3), ...)
-├── .env.contract                # Required variables + secret markers; also a template
+├── .env.contract                # Required variables + secret markers (not runtime defaults)
 ├── observability/               # Prometheus + Grafana configuration
 │   ├── prometheus/
 │   │   ├── prometheus.yml
@@ -32,38 +33,51 @@ This repo is cloned on the server (`~/ductifact/infra/`) and contains everything
 │       ├── provisioning/
 │       └── dashboards/
 └── scripts/
-    ├── deploy.sh                # Deploy script (reads only .env.<env>)
+    ├── generate_env.sh         # Build and validate a final .env.<env>
+    ├── sync_remote_and_trigger_deploy.sh # CI: generate, copy over SSH, deploy
+    ├── deploy.sh               # Consume .env.<env>; validate, deploy, smoke tests
     ├── smoke.sh                 # Post-deploy health checks
-    ├── validate_env.sh          # Runtime env validation against .env.contract
-    └── validate_repo.sh         # Repo validation using .env.contract key sets
+    ├── validate_env.sh         # Runtime env validation against .env.contract
+    └── validate_repo.sh        # Repo validation, including all environment inputs
 ```
 
-## Deployment Flow
+## Environment files and deployment
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│ STAGING (automatic via PR + auto-merge)                           │
-│                                                                   │
-│ backend/frontend image publish                                     │
-│   → propose-staging.yml opens PR updating staging.manifest.env    │
-│   → CI ✅ + auto-merge                                             │
-│   → deploy-staging.yml                                             │
-│   → _deploy.yml builds .env.staging from environments/* + secrets │
-│   → SSH to server → deploy.sh staging                             │
-└──────────────────────────────────────────────────────────────────┘
+`deploy.sh` consumes **only the final `.env.<environment>` file** as runtime
+configuration. The files in `environments/` are versioned generation inputs;
+`.env.contract` defines the required variables and marks secret keys. Its example
+values are documentation, not defaults copied into runtime files.
 
-┌──────────────────────────────────────────────────────────────────┐
-│ PRODUCTION (semi-automatic via GitOps)                            │
-│                                                                   │
-│ 1. Human validates in staging                                     │
-│ 2. Trigger propose-production.yml (manual)                        │
-│ 3. Workflow opens PR bumping RELEASE_VERSION + production images   │
-│ 4. Human reviews + approves + merges                              │
-│ 5. deploy-production.yml triggers                                 │
-│ 6. _deploy.yml builds .env.production from environments/* + secrets│
-│ 7. SSH to server → deploy.sh production                           │
-└──────────────────────────────────────────────────────────────────┘
+```text
+environments/<env>.config.env   ─┐
+environments/<env>.manifest.env ─┼─ generate_env.sh <env> ─ .env.<env> ─ deploy.sh <env>
+environments/images.manifest.env┘          ↑
+                                   GitHub secrets (staging/production)
 ```
+
+The Bash generator combines the three inputs, replaces CI secret placeholders,
+validates the result, and writes a private file (mode `600`). It refuses to
+overwrite an existing file unless `--force` is supplied. Validation failures
+leave the previous file intact. Duplicate variables are rejected.
+
+Local defaults come from `environments/local.*.env`. After generation, edit
+`.env.local` directly for personal settings; it is ignored by Git and is never
+regenerated by `deploy.sh`. `--force` replaces the entire file, including personal
+settings and credentials, with the generation inputs. It does not merge values.
+
+For staging/production, make persistent changes in `environments/` and GitHub
+Environment secrets; direct runtime edits are replaced by the next CI deployment.
+
+Staging flow: image publication → staging manifest PR + CI + auto-merge →
+`deploy-staging.yml` → `sync_remote_and_trigger_deploy.sh staging` →
+`generate_env.sh staging` with GitHub Environment secrets → copy `.env.staging`
+to the server → `deploy.sh staging`.
+
+Production flow: validate staging → run `propose-production.yml` → review and
+merge the promotion PR → `deploy-production.yml` →
+`sync_remote_and_trigger_deploy.sh production` → `generate_env.sh production`
+with GitHub Environment secrets → copy `.env.production` to the server →
+`deploy.sh production`.
 
 ### Promoting to Production
 
@@ -95,31 +109,78 @@ git push origin promote/release-2026-05-20
 # Revert the last promotion commit
 git revert HEAD
 git push origin main
-# → cd-production.yml triggers → deploys the previous versions
+# → deploy-production.yml triggers → deploys the previous versions
 ```
 
 ## Setup
 
+Generation and runtime validation use Bash and awk. Deployment requires Docker
+with Compose v2 supporting `config --environment`. Python remains used only by
+the existing repository checks for JSON/YAML files in CI.
+
+### Local deployment
+
+From `infra/`, with `backend/` and `frontend/` checked out beside it:
+
 ```bash
-# 1. Clone on the server
-git clone https://github.com/hyka-tech-ductifact/infra.git ~/ductifact/infra
-cd ~/ductifact/infra
+# Build the image names declared in environments/local.manifest.env
+docker build -t backend-app ../backend
+docker build -t frontend-app ../frontend
 
-# 2. Optional local bootstrap: copy the contract and replace example values
-cp .env.contract .env.local
-# Set local images in .env.local (required for local deploy)
-# BACKEND_IMAGE=backend-app
-# FRONTEND_IMAGE=frontend-app
-# CI-driven deploys build .env.staging/.env.production from environments/* + GitHub Environment secrets
-# deploy.sh never generates .env files; it only consumes .env.local/.env.staging/.env.production
-
-# 3. Log in to ghcr.io
-echo "YOUR_GITHUB_TOKEN" | docker login ghcr.io -u YOUR_USER --password-stdin
-
-# 4. Start the environments
-./scripts/deploy.sh staging
-./scripts/deploy.sh production
+# Prepare the final runtime configuration, then deploy
+./scripts/generate_env.sh local
+./scripts/deploy.sh local
 ```
+
+`local.config.env` contains development-only credentials. Never reuse them in
+staging/production. Keep `.env.local` while keeping the corresponding data volumes.
+
+For personal settings, edit `.env.local` directly, for example:
+
+```dotenv
+BACKEND_PORT=8123
+PUBLIC_BACKEND_URL=http://localhost:8123/v1
+PUBLIC_FILE_STORAGE_URL=http://localhost:8123/v1/files
+```
+
+Validate without deploying:
+
+```bash
+./scripts/validate_env.sh local
+```
+
+To explicitly start over from the versioned defaults:
+
+```bash
+./scripts/generate_env.sh local --force
+```
+
+This replaces all settings, including credentials. With existing volumes, keep
+credentials consistent with the services already initialized from them.
+Existing manually maintained `.env.local` files can continue to be used directly.
+
+SMTP must point to a server reachable from the backend container. Configure it
+in `.env.local` if needed. The local default uses `host.docker.internal:1025`
+for a host SMTP capture service; Linux setups must provide that host mapping or
+use a reachable address. Infra Compose does not start an SMTP service.
+
+### Staging and production
+
+Clone this repo on the server at `~/ductifact/infra` and configure the GitHub
+Environment secrets listed below. The deployment workflows call the same
+generator as local, inject secrets marked `SECRET_IN_GITHUB_ENV`, and upload the
+final file. Generation itself requires no SSH or Docker.
+
+For scripts/CI, `--output PATH` chooses a different output destination:
+
+```bash
+# Required application secrets must already be exported by CI
+./scripts/generate_env.sh staging --output /tmp/.env.staging
+./scripts/validate_env.sh staging --file /tmp/.env.staging
+```
+
+On the server, `./scripts/deploy.sh staging` or `production` deploys the final
+file already installed by CI. It does not regenerate configuration.
 
 ## Required Secrets (GitHub)
 
@@ -174,12 +235,12 @@ storage metrics collection is not configured in this stack yet.
 ## Notes
 
 - `.env.production`, `.env.staging`, and `.env.local` are **runtime files only** and are **never committed**.
-- `.env.contract` defines the required runtime variables and identifies secrets with `SECRET_IN_GITHUB_ENV`. It also serves as a template; its example values are not runtime defaults.
-- `validate_env.sh` checks that variables from `.env.contract` are present and non-empty in `.env.<env>`.
-- `validate_repo.sh` derives config, platform image, and secret key sets from `.env.contract` to validate `environments/*`.
+- `.env.contract` defines required runtime variables and identifies secret keys with `SECRET_IN_GITHUB_ENV`. Use `generate_env.sh` to prepare runtime files.
+- `validate_env.sh` checks required/non-empty variables, duplicate keys, unresolved placeholders, matching `ENV`, ports (1–65535), positive counts/TTLs, non-negative `REDIS_DB`, booleans, public HTTP(S) URLs, basic image references/digests. Errors name variables without printing their values. Connectivity and credentials are checked by the running services and smoke tests.
+- `validate_repo.sh` generates and validates all three environments with dummy CI secrets, and rejects real credentials in remote environment inputs.
 - `deploy.sh` validates `.env.<env>` against the contract before deploying, then consumes that file as its only runtime source of truth.
 - `environments/*.config.env` and `environments/*manifest.env` are **auxiliary build inputs** used to construct final `.env` files.
-- Sensitive values are never committed; placeholders in config (`SECRET_IN_GITHUB_ENV`) are replaced in CI.
+- Real secrets are never committed. Local uses development-only defaults; remote placeholders (`SECRET_IN_GITHUB_ENV`) are replaced from CI secrets.
 - Staging and production use **different credentials** (DB, JWT).
 - Ports are only exposed on `127.0.0.1` — Caddy (host-level) handles reverse proxying.
 - Full CD guide available at `backend/docs/GUIDE_CD.md`.
@@ -187,10 +248,10 @@ storage metrics collection is not configured in this stack yet.
 
 ## Image Versioning Policy
 
-- `docker-compose.yml` is the runtime source of truth for infrastructure services (`postgres`, `redis`, `s3`, `prometheus`, `grafana`).
+- `docker-compose.yml` defines the services; `environments/images.manifest.env` supplies shared platform image versions.
 - External images should be pinned with immutable references (`tag@sha256:digest` or `@sha256:digest`) to avoid drift.
 - `environments/{staging,production}.manifest.env` controls app promotions (`BACKEND_IMAGE`, `FRONTEND_IMAGE`) and should use immutable `sha-*` tags.
-- Local uses `.env.local` for `BACKEND_IMAGE` and `FRONTEND_IMAGE`.
+- `environments/local.manifest.env` supplies local application images; the generated `.env.local` is consumed at deployment.
 - Update flow: bump in staging first, validate smoke checks, then promote to production via PR.
 
 ## Contributing
