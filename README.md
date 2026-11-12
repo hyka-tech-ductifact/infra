@@ -22,7 +22,7 @@ This repo is cloned on the server (`~/ductifact/infra/`) and contains everything
 │   ├── production.config.env    # Production runtime config + explicit secret placeholders
 │   ├── staging.manifest.env     # Staging manifest (image versions)
 │   ├── staging.config.env       # Staging runtime config + explicit secret placeholders
-│   └── images.manifest.env      # Shared infra/base images (postgres, redis, minio, ...)
+│   └── images.manifest.env      # Shared infra/base images (postgres, redis, RustFS (S3), ...)
 ├── .env.example                 # Single environment variables template (reference only)
 ├── observability/               # Prometheus + Grafana configuration
 │   ├── prometheus/
@@ -131,12 +131,44 @@ echo "YOUR_GITHUB_TOKEN" | docker login ghcr.io -u YOUR_USER --password-stdin
 | `CF_ACCESS_CLIENT_SECRET` | deploy-staging/deploy-production | Cloudflare Access service token secret |
 | `DB_PASSWORD` | deploy-staging/deploy-production | Database password |
 | `JWT_SECRET` | deploy-staging/deploy-production | JWT signing secret |
-| `MINIO_ROOT_USER` | deploy-staging/deploy-production | MinIO root username |
-| `MINIO_ROOT_PASSWORD` | deploy-staging/deploy-production | MinIO root password |
+| `S3_ACCESS_KEY` | deploy-staging/deploy-production | S3 access key |
+| `S3_SECRET_KEY` | deploy-staging/deploy-production | S3 secret key |
 | `SMTP_USERNAME` | deploy-staging/deploy-production | SMTP username |
 | `SMTP_PASSWORD` | deploy-staging/deploy-production | SMTP password / API key |
 | `REDIS_PASSWORD` | deploy-staging/deploy-production | Redis password |
 | `INFRA_PAT` | backend/frontend repos | PAT with `repo` scope to dispatch events to this repo |
+
+## S3 storage rollout
+
+The `s3` service runs the same pinned RustFS image as backend development.
+Compose passes `S3_HOST=s3`, `S3_PORT=9000`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`,
+`S3_BUCKET`, and `S3_USE_SSL=false` to the backend. HTTP is used on the internal
+Docker network; only the console is published on localhost via `S3_CONSOLE_PORT`.
+The server receives the credentials through its required `RUSTFS_*` variables.
+
+Before deploying this change to an existing environment:
+
+1. Create `S3_ACCESS_KEY` and `S3_SECRET_KEY` in both GitHub Environments
+   (`staging` and `production`), and update any manually maintained `.env.*` files
+   to the keys in `.env.example`, including `S3_IMAGE`.
+2. Back up the existing object store. Start RustFS separately with a fresh volume
+   and configure two S3 remotes in `rclone`: `source` for the previous server and
+   `destination` for RustFS. Keep the current bucket name for each environment.
+3. Pause uploads and deletes, copy objects with
+   `rclone copy source:BUCKET destination:BUCKET`, then verify them with
+   `rclone check source:BUCKET destination:BUCKET --download`.
+4. Point the `s3` service at the populated RustFS volume before deploying, then
+   run `./scripts/smoke.sh staging` (or `production`) and verify existing images
+   through the API before resuming writes.
+
+The new volume is `ductifact-<environment>_rustfs_data` by default. The previous
+server's volume is retained; its data format must not be mounted directly into
+RustFS. A normal deploy does not copy objects into the new volume.
+
+Storage health is checked by Compose and `smoke.sh` via `/health`, and the backend
+checks S3 connectivity through `/readyz`. RustFS metrics require an
+[OpenTelemetry Collector](https://docs.rustfs.com/en/operations/observability);
+storage metrics collection is not configured in this stack yet.
 
 ## Notes
 
@@ -152,7 +184,7 @@ echo "YOUR_GITHUB_TOKEN" | docker login ghcr.io -u YOUR_USER --password-stdin
 
 ## Image Versioning Policy
 
-- `docker-compose.yml` is the runtime source of truth for infrastructure services (`postgres`, `redis`, `minio`, `prometheus`, `grafana`).
+- `docker-compose.yml` is the runtime source of truth for infrastructure services (`postgres`, `redis`, `s3`, `prometheus`, `grafana`).
 - External images should be pinned with immutable references (`tag@sha256:digest` or `@sha256:digest`) to avoid drift.
 - `environments/{staging,production}.manifest.env` controls app promotions (`BACKEND_IMAGE`, `FRONTEND_IMAGE`) and should use immutable `sha-*` tags.
 - Local uses `.env.local` for `BACKEND_IMAGE` and `FRONTEND_IMAGE`.

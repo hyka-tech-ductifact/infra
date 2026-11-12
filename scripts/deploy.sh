@@ -88,7 +88,7 @@ echo "Reading deployment variables from $ENV_FILE"
 BACKEND_IMAGE=$(grep -E '^BACKEND_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
 FRONTEND_IMAGE=$(grep -E '^FRONTEND_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
 POSTGRES_IMAGE=$(grep -E '^POSTGRES_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
-MINIO_IMAGE=$(grep -E '^MINIO_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
+S3_IMAGE=$(grep -E '^S3_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
 REDIS_IMAGE=$(grep -E '^REDIS_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
 PROMETHEUS_IMAGE=$(grep -E '^PROMETHEUS_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
 GRAFANA_IMAGE=$(grep -E '^GRAFANA_IMAGE=' "$ENV_FILE" | cut -d'=' -f2-)
@@ -98,7 +98,7 @@ RELEASE_VERSION=$(grep -E '^RELEASE_VERSION=' "$ENV_FILE" | cut -d'=' -f2- || tr
 export BACKEND_IMAGE
 export FRONTEND_IMAGE
 export POSTGRES_IMAGE
-export MINIO_IMAGE
+export S3_IMAGE
 export REDIS_IMAGE
 export PROMETHEUS_IMAGE
 export GRAFANA_IMAGE

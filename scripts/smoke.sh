@@ -4,7 +4,7 @@
 # Verifies that all services are healthy and communicating:
 #   1. Backend API responds on /healthz (liveness) and /readyz (readiness)
 #   2. PostgreSQL is reachable (via /readyz)
-#   3. MinIO is healthy
+#   3. S3 storage is healthy
 #   4. Redis is healthy
 #   5. Frontend is healthy
 #   6. Prometheus is healthy
@@ -131,21 +131,21 @@ else
   fail "Frontend is not reachable"
 fi
 
-# ── 4. MinIO health ─────────────────────────────────────────
+# ── 4. S3 storage health ─────────────────────────────────────────
 echo ""
-MINIO_CONTAINER="ductifact_${ENV}_minio"
-echo "MinIO (${MINIO_CONTAINER}):"
+S3_CONTAINER="ductifact_${ENV}_s3"
+echo "S3 storage (${S3_CONTAINER}):"
 
-if docker inspect --format='{{.State.Running}}' "$MINIO_CONTAINER" 2>/dev/null | grep -q true; then
-  pass "MinIO container is running"
+if docker inspect --format='{{.State.Running}}' "$S3_CONTAINER" 2>/dev/null | grep -q true; then
+  pass "S3 storage container is running"
 else
-  fail "MinIO container is not running"
+  fail "S3 storage container is not running"
 fi
 
-if docker exec "$MINIO_CONTAINER" curl -sf --max-time 5 http://localhost:9000/minio/health/live > /dev/null 2>&1; then
-  pass "MinIO health endpoint responds OK"
+if docker exec "$S3_CONTAINER" curl -sf --max-time 5 http://127.0.0.1:9000/health > /dev/null 2>&1; then
+  pass "S3 storage health endpoint responds OK"
 else
-  fail "MinIO health endpoint is not reachable"
+  fail "S3 storage health endpoint is not reachable"
 fi
 
 # ── 5. Redis health ─────────────────────────────────────────

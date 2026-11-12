@@ -20,21 +20,26 @@ services:
     networks:
       - internal
 
-  # ── MinIO (S3-compatible object storage) ───────────────────
-  minio:
-    image: ${MINIO_IMAGE}
-    container_name: ductifact_${ENV}_minio
+  # ── S3-compatible object storage (RustFS) ──────────────────
+  # Keep the service protocol-neutral and the data volume server-specific.
+  # Existing objects must be copied via S3 before switching servers.
+  s3:
+    image: ${S3_IMAGE}
+    container_name: ductifact_${ENV}_s3
     restart: unless-stopped
-    command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${S3_SECRET_KEY}
     ports:
-      - "127.0.0.1:${MINIO_CONSOLE_PORT}:9001"
+      - "127.0.0.1:${S3_CONSOLE_PORT}:9001"
     volumes:
-      - minio_data:/data
+      - rustfs_data:/data
     healthcheck:
-      test: [ "CMD-SHELL", "mc ready local || exit 1" ]
+      test: [ "CMD", "curl", "-fsS", "http://127.0.0.1:9000/health" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -88,12 +93,12 @@ services:
       - LOGIN_THROTTLE_MAX_ATTEMPTS=${LOGIN_THROTTLE_MAX_ATTEMPTS}
       - LOGIN_THROTTLE_WINDOW_SECONDS=${LOGIN_THROTTLE_WINDOW_SECONDS}
       - LOGIN_THROTTLE_LOCKOUT_SECONDS=${LOGIN_THROTTLE_LOCKOUT_SECONDS}
-      - MINIO_HOST=minio
-      - MINIO_API_PORT=9000
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
-      - MINIO_BUCKET=${MINIO_BUCKET}
-      - MINIO_USE_SSL=false
+      - S3_HOST=s3
+      - S3_PORT=9000
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY}
+      - S3_SECRET_KEY=${S3_SECRET_KEY}
+      - S3_BUCKET=${S3_BUCKET}
+      - S3_USE_SSL=false
       - SMTP_HOST=${SMTP_HOST}
       - SMTP_PORT=${SMTP_PORT}
       - SMTP_AUTH=${SMTP_AUTH}
@@ -110,7 +115,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      minio:
+      s3:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -175,7 +180,7 @@ services:
 
 volumes:
   postgres_data:
-  minio_data:
+  rustfs_data:
   redis_data:
   prometheus_data:
   grafana_data:

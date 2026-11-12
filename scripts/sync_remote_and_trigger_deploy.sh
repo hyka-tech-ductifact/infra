@@ -74,8 +74,8 @@ for key in \
 	VPS_HOST \
 	DB_PASSWORD \
 	JWT_SECRET \
-	MINIO_ROOT_USER \
-	MINIO_ROOT_PASSWORD \
+	S3_ACCESS_KEY \
+	S3_SECRET_KEY \
 	SMTP_USERNAME \
 	SMTP_PASSWORD \
 	REDIS_PASSWORD; do
@@ -111,8 +111,8 @@ chmod 600 ~/.ssh/deploy_key
 
 set_env_value "DB_PASSWORD" "$DB_PASSWORD"
 set_env_value "JWT_SECRET" "$JWT_SECRET"
-set_env_value "MINIO_ROOT_USER" "$MINIO_ROOT_USER"
-set_env_value "MINIO_ROOT_PASSWORD" "$MINIO_ROOT_PASSWORD"
+set_env_value "S3_ACCESS_KEY" "$S3_ACCESS_KEY"
+set_env_value "S3_SECRET_KEY" "$S3_SECRET_KEY"
 set_env_value "SMTP_USERNAME" "$SMTP_USERNAME"
 set_env_value "SMTP_PASSWORD" "$SMTP_PASSWORD"
 set_env_value "REDIS_PASSWORD" "$REDIS_PASSWORD"

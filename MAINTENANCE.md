@@ -164,7 +164,7 @@ cd ~/ductifact/infra
 docker compose --env-file .env.staging down
 
 # Remove the data volumes (staging only!)
-docker volume rm ductifact_staging_postgres_data ductifact_staging_minio_data
+docker volume rm ductifact-staging_postgres_data ductifact-staging_rustfs_data
 
 # Bring it back up
 docker compose --env-file .env.staging up -d
