@@ -1,86 +1,48 @@
 # Infrastructure scripts
 
-Run the examples below from the `infra/` directory. Scripts resolve repository
-files relative to their own location, so they can also be invoked by absolute path.
+Run these examples from `infra/`. Folders group responsibilities: `ci/` contains
+workflow entry points, `ops/` performs operations, and `checks/` verifies results.
 
-## Choose a command
+## Commands
 
-| Task | Command | Where to run it |
-|------|---------|-----------------|
-| Prepare local configuration | `./scripts/ops/generate_env.sh local` | Developer machine |
-| Deploy local services | `./scripts/ops/deploy.sh local` | Developer machine |
-| Redeploy the installed staging configuration | `./scripts/ops/deploy.sh staging` | Target server |
-| Stop an environment | `./scripts/ops/deploy.sh staging stop` | Target server |
-| Validate a runtime file | `./scripts/checks/env.sh local` | Machine containing that file |
-| Diagnose service health | `./scripts/checks/health.sh staging` | Target server |
-| Exercise the API user journey | `./scripts/checks/user_flow.sh local fresh-test@example.com` | Developer machine |
-| Create a database backup | `./scripts/ops/db.sh backup production` | Target server; also usable from cron |
-| List backups | `./scripts/ops/db.sh list production` | Target server |
-| Restore a backup | `./scripts/ops/db.sh restore staging /path/to/backup.sql.gz` | Target server |
-| Check a repository change | `./scripts/ci/check_repo.sh` | Developer machine or PR runner |
+| Task | Command | Where |
+|------|---------|-------|
+| Generate local config | `./scripts/ops/generate_env.sh local` | Developer machine |
+| Deploy | `./scripts/ops/deploy.sh local` | Machine running the containers |
+| Stop services | `./scripts/ops/deploy.sh staging stop` | Target server |
+| Validate a runtime file | `./scripts/checks/env.sh local` | Machine containing the file |
+| Check service health | `./scripts/checks/health.sh staging` | Target server |
+| Test the API journey | `./scripts/checks/user_flow.sh local fresh-test@example.com` | Machine running the containers |
+| Check the repo | `./scripts/ci/check_repo.sh` | Developer machine or PR runner |
 
-Commands accepting an environment support `local`, `staging`, and `production`,
-except `ci/deploy_remote.sh`, which supports staging and production only.
-The user-flow check requires a fresh email address with an inbox you can read.
-It requests a registration code, prompts for that code, then creates a test account
-and application data. Cleanup runs on exit, including failed steps, and removes
-only the resources/account created by this run. It runs only when explicitly
-requested, not as part of deployment. Both HTTP checks require `jq` for JSON.
-Cleanup failures are reported; interrupted networking may still require manual cleanup.
+Environment arguments support `local`, `staging`, and `production`.
+`ci/deploy_remote.sh` accepts staging/production only and runs in CI with secrets
+and SSH access. See [maintenance](../MAINTENANCE.md#database-backups) for `ops/db.sh`.
 
-## Responsibilities and automatic calls
+## Automatic calls
 
-Folders describe responsibilities, not exclusive manual/automatic usage.
-
-| Script | Usual caller | Calls automatically |
-|--------|--------------|---------------------|
-| `ci/check_repo.sh` | PR workflow; optionally a developer | `ops/generate_env.sh` for all environments, with dummy CI secrets |
-| `ci/deploy_remote.sh` | Staging/production deployment workflow, on the runner | `ops/generate_env.sh`, then `ops/deploy.sh` on the server over SSH |
-| `ops/generate_env.sh` | Developer or either CI entry point | `checks/env.sh` before writing the final file |
-| `ops/deploy.sh` | Operator or remote deployment script | `checks/env.sh`, deployment, then `checks/health.sh` |
-| `ops/db.sh` | Operator; cron for backups | No other repository scripts |
-| `checks/env.sh` | Generator, deployment, or operator | No other repository scripts |
-| `checks/health.sh` | Deployment or operator | No other repository scripts |
-| `checks/user_flow.sh` | Operator | No other repository scripts |
-
-```mermaid
-flowchart TD
-    PR[PR workflow] --> Repo[ci/check_repo.sh]
-    CD[Deployment workflow: runner] --> Remote[ci/deploy_remote.sh]
-    Repo --> Generate[ops/generate_env.sh]
-    Remote --> Generate
-    Generate --> Env[checks/env.sh]
-    Remote -->|Upload runtime file, then SSH| Deploy[ops/deploy.sh: target server]
-    Deploy -->|Before deployment| Env
-    Deploy -->|After deployment| Health[checks/health.sh]
+```text
+ci/check_repo.sh → ops/generate_env.sh → checks/env.sh
+ci/deploy_remote.sh → ops/generate_env.sh → upload → SSH → ops/deploy.sh
+ops/deploy.sh → checks/env.sh → deploy → checks/health.sh
 ```
 
-Running `ops/deploy.sh` includes validation and health checks; you do not need to
-run them separately. Its `stop` action only stops the environment.
-Deployment uses the current checkout, stops if any image pull fails, and does
-not prune images on the host. CI updates the checkout before calling deployment;
-for a manual server update, run `git pull --ff-only origin main` first.
+`deploy.sh` includes validation and health checks, waits up to 120 seconds for
+startup, and prints diagnostics on failure. Its `stop` action only stops services.
+CI updates the server checkout; before a manual server update, run
+`git pull --ff-only origin main` yourself. Deployment uses the installed runtime
+file and does not regenerate it.
 
-Generation validates the file it creates; deployment validates again because the
-runtime file may have been edited or copied since generation.
+`user_flow.sh` runs only when explicitly invoked. Use a fresh email inbox you can
+read: the script prompts for the registration code and cleans up its test resources
+and account on exit. Reported cleanup failures may require manual cleanup.
 
-## Environment files
+## Generator options
 
-`ops/generate_env.sh` combines `environments/<env>.config.env`,
-`environments/<env>.manifest.env`, and `environments/images.manifest.env`.
-Local uses development defaults; CI injects staging/production secrets.
-`ops/deploy.sh` consumes the final `.env.<env>` and never regenerates it.
+- `--output PATH`: write somewhere other than `.env.<env>`.
+- `--force`: replace the entire output file with the generation inputs.
+- `checks/env.sh <env> --file PATH`: validate a file at a different location.
 
-Edit `.env.local` directly for personal settings. Generation refuses to overwrite
-an existing file; `--force` explicitly replaces the entire file with the inputs.
-Use `--output PATH` to generate elsewhere and `checks/env.sh <env> --file PATH`
-to validate that file. See [environment setup](../README.md#setup) for details.
-
-## Existing automation
-
-Update any external cron jobs or manual commands that used the former paths.
-For example, a backup cron entry now calls `scripts/ops/db.sh`:
-
-```cron
-0 3 * * * cd ~/ductifact/infra && ./scripts/ops/db.sh backup production >> ~/backups/ductifact/backup.log 2>&1
-```
+See [configuration](../README.md#configuration) for the inputs and final runtime files.
+When changing `BACKEND_PORT` locally, update `PUBLIC_BACKEND_URL` and
+`PUBLIC_FILE_STORAGE_URL` to match so the browser calls the correct API.
