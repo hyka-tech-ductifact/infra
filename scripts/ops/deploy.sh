@@ -58,8 +58,6 @@ command -v jq >/dev/null || {
   echo "ERROR: jq is required by the post-deploy health checks. Install it before deploying." >&2
   exit 1
 }
-CONTAINER_BACKEND="ductifact_${ENV}_backend"
-CONTAINER_FRONTEND="ductifact_${ENV}_frontend"
 
 # ── Pre-deploy validation ────────────────────────────────────
 echo "Running pre-deploy validation..."
@@ -75,28 +73,30 @@ echo ""
 COMPOSE=(docker compose --env-file "$ENV_FILE")
 "${COMPOSE[@]}" config --quiet
 
+# Diagnostics must not hide the original deployment failure if Docker itself
+# is unavailable. Limit output and never dump the interpolated configuration.
+show_diagnostics() {
+  echo "=== Container status ===" >&2
+  "${COMPOSE[@]}" ps --all >&2 || true
+  echo "=== Recent service logs ===" >&2
+  "${COMPOSE[@]}" logs --no-color --tail=30 >&2 || true
+}
+
 echo "=== Deploying $ENV using $ENV_FILE ==="
 if [[ "$ENV" != local ]]; then
   # A failed pull must stop deployment instead of silently using an old image.
   "${COMPOSE[@]}" pull
 fi
 
-# ── Restart containers ───────────────────────────────────────
-echo "Restarting containers..."
-"${COMPOSE[@]}" up -d --remove-orphans
-
-# ── Verify containers are running ────────────────────────────
-echo "Waiting for containers to start..."
-sleep 5
-
-for CONTAINER in "$CONTAINER_BACKEND" "$CONTAINER_FRONTEND"; do
-  if ! docker inspect --format='{{.State.Running}}' "$CONTAINER" 2>/dev/null | grep -q true; then
-    echo "ERROR: $CONTAINER is not running"
-    docker logs --tail=30 "$CONTAINER"
-    exit 1
-  fi
-  echo "✅ $CONTAINER is running"
-done
+# ── Start containers and wait for readiness ──────────────────
+# Compose waits for healthchecks where defined and running state otherwise.
+# Bound the wait even when restart policies keep a broken backend alive.
+echo "Starting services and waiting for readiness (timeout: 120s)..."
+if ! "${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 120; then
+  echo "ERROR: $ENV deployment failed: services did not become ready. See status and logs below." >&2
+  show_diagnostics
+  exit 1
+fi
 
 # ── Post-deploy smoke tests ──────────────────────────────────
 echo "Running post-deploy smoke tests..."
@@ -104,7 +104,6 @@ if "${SCRIPT_DIR}/../checks/health.sh" "$ENV"; then
   echo "=== $ENV deploy successful! ==="
 else
   echo "ERROR: Deploy completed but smoke tests failed!"
-  echo "Services may not be healthy. Check logs with:"
-  echo "  docker logs ductifact_${ENV}_backend --tail=50"
+  show_diagnostics
   exit 1
 fi

@@ -112,6 +112,14 @@ services:
       - REDIS_AUTH=true
       - REDIS_PASSWORD=${REDIS_PASSWORD}
       - REDIS_DB=${REDIS_DB}
+    # The runtime image includes BusyBox wget. Readiness checks the database
+    # and storage; a running process alone may be in a restart loop.
+    healthcheck:
+      test: [ "CMD", "wget", "-q", "-T", "15", "-O", "/dev/null", "http://127.0.0.1:8080/readyz" ]
+      interval: 5s
+      timeout: 16s
+      retries: 5
+      start_period: 10s
     depends_on:
       postgres:
         condition: service_healthy

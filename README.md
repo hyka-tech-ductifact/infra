@@ -115,7 +115,7 @@ git push origin main
 ## Setup
 
 Generation and runtime validation use Bash 4.4+ and standard system utilities. Deployment requires Docker
-with Compose v2 supporting `config --environment`. `jq` is required for the
+with Compose v2 supporting `config --environment` and `up --wait --wait-timeout`. `jq` is required for the
 health/user-flow checks and repository JSON checks. Python/PyYAML remains used
 only for repository YAML checks in CI.
 
@@ -132,6 +132,12 @@ docker build -t frontend-app ../frontend
 ./scripts/ops/generate_env.sh local
 ./scripts/ops/deploy.sh local
 ```
+
+Deployment waits up to 120 seconds for services to become ready. The backend
+healthcheck calls `/readyz`, which requires database and storage connectivity.
+Startup failures and
+failed smoke tests exit non-zero and print container status and recent service
+logs automatically. A backend restart loop does not count as a successful deploy.
 
 `local.config.env` contains development-only credentials. Never reuse them in
 staging/production. Keep `.env.local` while keeping the corresponding data volumes.
