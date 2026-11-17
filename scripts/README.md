@@ -12,6 +12,7 @@ workflow entry points, `ops/` performs operations, and `checks/` verifies result
 | Stop services | `./scripts/ops/deploy.sh staging stop` | Target server |
 | Validate a runtime file | `./scripts/checks/env.sh local` | Machine containing the file |
 | Check service health | `./scripts/checks/health.sh staging` | Target server |
+| Check all services strictly | `./scripts/checks/health.sh staging --strict` | Target server |
 | Test the API journey | `./scripts/checks/user_flow.sh local fresh-test@example.com` | Machine running the containers |
 | Check the repo | `./scripts/ci/check_repo.sh` | Developer machine or PR runner |
 
@@ -28,7 +29,19 @@ ops/deploy.sh → checks/env.sh → deploy → checks/health.sh
 ```
 
 `deploy.sh` includes validation and health checks, waits up to 120 seconds for
-startup, and prints diagnostics on failure. Its `stop` action only stops services.
+startup, and prints diagnostics on failure. Each deployment also recreates
+Prometheus to load the current mounted configuration and alert rules, preserving
+its data volume. Health checks allow a 60-second retry window for backend scraping
+and report the target URL and last error on failure. Its `stop` action only stops services.
+Backend, frontend, storage, and Redis failures block deployment. Monitoring image
+pull/startup failures and failed metrics, Prometheus, or Grafana checks emit
+`::warning::` annotations without failing deployment. CI also writes the deployment
+result to the Actions job summary. Use `health.sh <env> --strict` to return a
+nonzero exit code for monitoring failures as well. Retries and target diagnostics
+apply in both modes.
+
+Run `python3 -B -m unittest discover -s scripts/tests -v` for deployment severity
+tests using simulated services. These tests also run as part of `check_repo.sh`.
 CI updates the server checkout; before a manual server update, run
 `git pull --ff-only origin main` yourself. Deployment uses the installed runtime
 file and does not regenerate it.

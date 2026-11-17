@@ -3,7 +3,7 @@
 # Runs on: Machine running the target containers; requires curl and jq.
 # Called by: ops/deploy.sh or operator for diagnosis.
 # Calls: No other repository scripts.
-# Usage: ./scripts/checks/health.sh <local|staging|production>
+# Usage: ./scripts/checks/health.sh <local|staging|production> [--strict]
 
 set -euo pipefail
 
@@ -18,6 +18,11 @@ NC='\033[0m' # No Color
 pass() { echo -e "  ${GREEN}✔${NC} $1"; }
 fail() { echo -e "  ${RED}✘${NC} $1"; FAILURES=$((FAILURES + 1)); }
 info() { echo -e "  ${YELLOW}…${NC} $1"; }
+monitoring_fail() {
+  WARNINGS=$((WARNINGS + 1))
+  printf '::warning::Monitoring degraded: %s\n' "$1"
+  if [[ "$STRICT" == true ]]; then fail "$1"; fi
+}
 
 wait_http_ok() {
   local url="$1"
@@ -36,15 +41,18 @@ wait_http_ok() {
 }
 
 FAILURES=0
+WARNINGS=0
+STRICT=false
 
 # ── Validate arguments ──────────────────────────────────────
 ENV="${1:-}"
 
-if [[ $# -ne 1 ]]; then
-  echo "Usage: $0 <environment>"
+if [[ $# -lt 1 || $# -gt 2 || ( $# -eq 2 && "$2" != --strict ) ]]; then
+  echo "Usage: $0 <environment> [--strict]"
   echo "  environment: local | staging | production"
   exit 1
 fi
+if [[ "${2:-}" == --strict ]]; then STRICT=true; fi
 
 case "$ENV" in
   local|staging|production) ;;
@@ -109,7 +117,7 @@ fi
 if wait_http_ok "${BACKEND_URL}/metrics" 10 3; then
   pass "/metrics endpoint available"
 else
-  fail "/metrics endpoint is not reachable"
+  monitoring_fail "/metrics endpoint is not reachable"
 fi
 
 # ── 3. Frontend health ──────────────────────────────────────
@@ -163,19 +171,20 @@ echo "Prometheus (${PROM_CONTAINER}):"
 if docker inspect --format='{{.State.Running}}' "$PROM_CONTAINER" 2>/dev/null | grep -q true; then
   pass "Prometheus container is running"
 else
-  fail "Prometheus container is not running"
+  monitoring_fail "Prometheus container is not running"
 fi
 
 if docker exec "$PROM_CONTAINER" wget -qO- --timeout=5 http://localhost:9090/-/healthy > /dev/null 2>&1; then
   pass "Prometheus is healthy"
 else
-  fail "Prometheus is not reachable"
+  monitoring_fail "Prometheus is not reachable"
 fi
 
 # ── 7. Prometheus scraping the backend ──────────────────────
-# Prometheus may need a few seconds to complete the first scrape after startup.
+# Allow several 15-second scrape intervals after the backend/Prometheus restart.
 SCRAPE_OK=false
-for _ in 1 2 3 4 5; do
+SCRAPE_DEADLINE=$((SECONDS + 60))
+while true; do
   TARGETS_JSON=$(docker exec "$PROM_CONTAINER" wget -qO- --timeout=5 http://localhost:9090/api/v1/targets 2>/dev/null || echo "")
   if jq -e '.status == "success" and
       ([.data.activeTargets[]? | select(.labels.job == "ductifact-api")] |
@@ -183,14 +192,23 @@ for _ in 1 2 3 4 5; do
     SCRAPE_OK=true
     break
   fi
+  if ((SECONDS >= SCRAPE_DEADLINE)); then break; fi
   sleep 3
 done
 
 if [[ "$SCRAPE_OK" == true ]]; then
   pass "Scraping ductifact-api target (health=up)"
 else
-  info "Prometheus reachable but ductifact-api target is not up yet (waited 15s)"
-  fail "ductifact-api target not healthy"
+  monitoring_fail "ductifact-api target not healthy"
+  if jq -e '.status == "success" and (.data.activeTargets | type == "array")' <<< "$TARGETS_JSON" >/dev/null 2>&1; then
+    jq -r '
+      [.data.activeTargets[] | select(.labels.job == "ductifact-api")] |
+      if length == 0 then "    No ductifact-api target found in the loaded Prometheus configuration."
+      else .[] | "    URL: \(.scrapeUrl)\n    Health: \(.health)\n    Last error: \(.lastError)\n    Last scrape: \(.lastScrape)"
+      end' <<< "$TARGETS_JSON"
+  else
+    info "Could not read a valid target list from the Prometheus API"
+  fi
 fi
 
 # ── 8. Grafana health ──────────────────────────────────────
@@ -200,13 +218,17 @@ echo "Grafana (${GRAF_URL}):"
 if wait_http_ok "${GRAF_URL}/api/health" 15 3; then
   pass "Grafana is healthy"
 else
-  fail "Grafana is not reachable"
+  monitoring_fail "Grafana is not reachable"
 fi
 
 # ── Summary ─────────────────────────────────────────────────
 echo ""
 if [[ $FAILURES -eq 0 ]]; then
-  echo -e "${GREEN}=== All smoke tests passed ===${NC}"
+  if [[ $WARNINGS -gt 0 ]]; then
+    echo -e "${YELLOW}=== Application healthy; monitoring degraded (${WARNINGS} warnings) ===${NC}"
+  else
+    echo -e "${GREEN}=== All smoke tests passed ===${NC}"
+  fi
   echo ""
   exit 0
 else

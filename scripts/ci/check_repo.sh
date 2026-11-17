@@ -9,6 +9,8 @@ set -euo pipefail
 
 command -v jq >/dev/null || { echo "ERROR: jq is required for JSON validation" >&2; exit 1; }
 
+python3 -B -m unittest discover -s "$(dirname "$0")/../tests" -v
+
 # ── Helpers: report validation results ───────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'

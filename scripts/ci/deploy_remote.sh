@@ -68,7 +68,7 @@ TARGET="${VPS_USER}@${VPS_HOST}"
 scp "${SSH_OPTIONS[@]}" "$ENV_TMP_FILE" "$TARGET:ductifact/infra/$REMOTE_FILE"
 # Environment and temporary filenames are fixed/generated locally.
 # shellcheck disable=SC2029
-ssh "${SSH_OPTIONS[@]}" "$TARGET" "
+if ssh "${SSH_OPTIONS[@]}" "$TARGET" "
   set -e
   cd ~/ductifact/infra
   trap 'rm -f $REMOTE_FILE' EXIT
@@ -76,4 +76,18 @@ ssh "${SSH_OPTIONS[@]}" "$TARGET" "
   chmod 600 $REMOTE_FILE
   mv -f $REMOTE_FILE $ENV_FILE_NAME
   ./scripts/ops/deploy.sh $ENVIRONMENT
-"
+" | tee "${ENV_TMP_DIR}/deploy.log"; then
+  if grep -q '^::warning::' "${ENV_TMP_DIR}/deploy.log"; then
+    DEPLOY_RESULT="Deployment completed with warnings. Review monitoring diagnostics in the deployment log."
+  else
+    DEPLOY_RESULT="Deployment completed successfully."
+  fi
+else
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    printf '### Deployment: %s\n\nDeployment failed. See the deployment log.\n' "$ENVIRONMENT" >> "$GITHUB_STEP_SUMMARY"
+  fi
+  exit 1
+fi
+if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+  printf '### Deployment: %s\n\n%s\n' "$ENVIRONMENT" "$DEPLOY_RESULT" >> "$GITHUB_STEP_SUMMARY"
+fi
