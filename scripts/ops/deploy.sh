@@ -83,16 +83,20 @@ show_diagnostics() {
 }
 
 echo "=== Deploying $ENV using $ENV_FILE ==="
+CORE_SERVICES=(postgres s3 redis backend frontend)
 if [[ "$ENV" != local ]]; then
   # A failed pull must stop deployment instead of silently using an old image.
-  "${COMPOSE[@]}" pull
+  "${COMPOSE[@]}" pull "${CORE_SERVICES[@]}"
+  if ! "${COMPOSE[@]}" pull prometheus grafana; then
+    echo "::warning::Could not pull monitoring images; attempting startup with available images."
+  fi
 fi
 
 # ── Start containers and wait for readiness ──────────────────
 # Compose waits for healthchecks where defined and running state otherwise.
 # Bound the wait even when restart policies keep a broken backend alive.
 echo "Starting services and waiting for readiness (timeout: 120s)..."
-if ! "${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 120; then
+if ! "${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 120 "${CORE_SERVICES[@]}"; then
   echo "ERROR: $ENV deployment failed: services did not become ready. See status and logs below." >&2
   show_diagnostics
   exit 1
@@ -103,9 +107,10 @@ fi
 # Its named data volume is preserved.
 echo "Reloading Prometheus configuration..."
 if ! "${COMPOSE[@]}" up -d --no-deps --force-recreate --wait --wait-timeout 120 prometheus; then
-  echo "ERROR: $ENV deployment failed: could not recreate Prometheus." >&2
-  show_diagnostics
-  exit 1
+  echo "::warning::Monitoring degraded: could not recreate Prometheus."
+fi
+if ! "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 120 grafana; then
+  echo "::warning::Monitoring degraded: could not start Grafana."
 fi
 
 # ── Post-deploy smoke tests ──────────────────────────────────
