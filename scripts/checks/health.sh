@@ -1,26 +1,13 @@
 #!/usr/bin/env bash
-# smoke.sh — Post-deploy smoke tests for a ductifact environment.
-#
-# Verifies that all services are healthy and communicating:
-#   1. Backend API responds on /healthz (liveness) and /readyz (readiness)
-#   2. PostgreSQL is reachable (via /readyz)
-#   3. MinIO is healthy
-#   4. Redis is healthy
-#   5. Frontend is healthy
-#   6. Prometheus is healthy
-#   7. Prometheus is scraping the backend successfully
-#   8. Grafana is healthy
-#
-# Usage:
-#   ./scripts/smoke.sh <environment>
-#
-#   environment: local | staging | production
-#
-# Examples:
-#   ./scripts/smoke.sh local
-#   ./scripts/smoke.sh staging
+# Check service health and communication after deployment.
+# Runs on: Machine running the target containers; requires curl and jq.
+# Called by: ops/deploy.sh or operator for diagnosis.
+# Calls: No other repository scripts.
+# Usage: ./scripts/checks/health.sh <local|staging|production>
 
 set -euo pipefail
+
+command -v jq >/dev/null || { echo "ERROR: jq is required for JSON health checks" >&2; exit 1; }
 
 # ── Helpers ──────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -36,12 +23,13 @@ wait_http_ok() {
   local url="$1"
   local attempts="${2:-10}"
   local sleep_seconds="${3:-3}"
+  local i
 
   for ((i = 1; i <= attempts; i++)); do
-    if curl -sf --max-time 5 "$url" > /dev/null 2>&1; then
+    if HTTP_BODY=$(curl -fsS --connect-timeout 3 --max-time 5 "$url" 2>/dev/null); then
       return 0
     fi
-    sleep "$sleep_seconds"
+    if ((i < attempts)); then sleep "$sleep_seconds"; fi
   done
 
   return 1
@@ -52,7 +40,7 @@ FAILURES=0
 # ── Validate arguments ──────────────────────────────────────
 ENV="${1:-}"
 
-if [[ -z "$ENV" ]]; then
+if [[ $# -ne 1 ]]; then
   echo "Usage: $0 <environment>"
   echo "  environment: local | staging | production"
   exit 1
@@ -67,7 +55,7 @@ case "$ENV" in
 esac
 
 # ── Load env file ───────────────────────────────────────────
-INFRA_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+INFRA_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_FILE="${INFRA_DIR}/.env.${ENV}"
 
 if [[ ! -f "$ENV_FILE" ]]; then
@@ -75,10 +63,14 @@ if [[ ! -f "$ENV_FILE" ]]; then
   exit 1
 fi
 
-set -a
-# shellcheck source=/dev/null
-source "$ENV_FILE"
-set +a
+# Let Compose read the same values used by the containers.
+ENV_VALUES="$(docker compose --project-directory "$INFRA_DIR" --env-file "$ENV_FILE" config --environment)"
+while IFS='=' read -r key value; do
+  case "$key" in
+    BACKEND_PORT|FRONTEND_PORT|GRAFANA_PORT|REDIS_PASSWORD) export "$key=$value" ;;
+  esac
+done <<< "$ENV_VALUES"
+unset ENV_VALUES
 
 BACKEND_URL="http://localhost:${BACKEND_PORT}"
 FRONTEND_URL="http://localhost:${FRONTEND_PORT}"
@@ -99,17 +91,16 @@ else
 fi
 
 if wait_http_ok "${BACKEND_URL}/readyz" 10 3; then
-  READYZ_BODY=$(curl -s --max-time 5 "${BACKEND_URL}/readyz")
-  READYZ_STATUS=$(echo "$READYZ_BODY" | grep -o '"status":"[^"]*"' | head -1)
-  if echo "$READYZ_STATUS" | grep -q '"status":"ready"'; then
-    pass "/readyz (readiness) responds OK — ready"
-  elif echo "$READYZ_STATUS" | grep -q '"status":"degraded"'; then
-    echo -e "  ${YELLOW}⚠${NC} /readyz (readiness) responds OK — degraded"
-    DEGRADED_SERVICES=$(echo "$READYZ_BODY" | grep -o '"warnings":\[[^]]*\]' | sed 's/"warnings":\[//;s/\]//;s/"//g' | tr ',' '\n')
-    while IFS= read -r svc; do
-      [[ -n "$svc" ]] && echo -e "    ${YELLOW}↳${NC} $svc"
-    done <<< "$DEGRADED_SERVICES"
-  fi
+  # Parse the same response that succeeded; do not issue a second request.
+  READYZ_STATUS=$(jq -er '.status | select(type == "string")' <<< "$HTTP_BODY" 2>/dev/null || true)
+  case "$READYZ_STATUS" in
+    ready) pass "/readyz (readiness) responds OK — ready" ;;
+    degraded)
+      info "/readyz responds OK — degraded"
+      jq -r '.warnings[]? | "    " + .' <<< "$HTTP_BODY"
+      ;;
+    *) fail "/readyz returned an invalid or unexpected status" ;;
+  esac
 else
   fail "/readyz (readiness) is not reachable (503 or timeout)"
 fi
@@ -131,21 +122,21 @@ else
   fail "Frontend is not reachable"
 fi
 
-# ── 4. MinIO health ─────────────────────────────────────────
+# ── 4. S3 storage health ─────────────────────────────────────────
 echo ""
-MINIO_CONTAINER="ductifact_${ENV}_minio"
-echo "MinIO (${MINIO_CONTAINER}):"
+S3_CONTAINER="ductifact_${ENV}_s3"
+echo "S3 storage (${S3_CONTAINER}):"
 
-if docker inspect --format='{{.State.Running}}' "$MINIO_CONTAINER" 2>/dev/null | grep -q true; then
-  pass "MinIO container is running"
+if docker inspect --format='{{.State.Running}}' "$S3_CONTAINER" 2>/dev/null | grep -q true; then
+  pass "S3 storage container is running"
 else
-  fail "MinIO container is not running"
+  fail "S3 storage container is not running"
 fi
 
-if docker exec "$MINIO_CONTAINER" curl -sf --max-time 5 http://localhost:9000/minio/health/live > /dev/null 2>&1; then
-  pass "MinIO health endpoint responds OK"
+if docker exec "$S3_CONTAINER" curl -sf --max-time 5 http://127.0.0.1:9000/health > /dev/null 2>&1; then
+  pass "S3 storage health endpoint responds OK"
 else
-  fail "MinIO health endpoint is not reachable"
+  fail "S3 storage health endpoint is not reachable"
 fi
 
 # ── 5. Redis health ─────────────────────────────────────────
@@ -186,9 +177,9 @@ fi
 SCRAPE_OK=false
 for _ in 1 2 3 4 5; do
   TARGETS_JSON=$(docker exec "$PROM_CONTAINER" wget -qO- --timeout=5 http://localhost:9090/api/v1/targets 2>/dev/null || echo "")
-  if [[ -n "$TARGETS_JSON" ]] && \
-     echo "$TARGETS_JSON" | grep -q '"job":"ductifact-api"' && \
-     echo "$TARGETS_JSON" | grep -q '"health":"up"'; then
+  if jq -e '.status == "success" and
+      ([.data.activeTargets[]? | select(.labels.job == "ductifact-api")] |
+       length > 0 and all(.[]; .health == "up"))' <<< "$TARGETS_JSON" >/dev/null 2>&1; then
     SCRAPE_OK=true
     break
   fi

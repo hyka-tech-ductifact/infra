@@ -1,23 +1,15 @@
 #!/usr/bin/env bash
-# validate_repo.sh — Validate repo-level infra assets and auxiliary build inputs.
-#
-# Runs automatically in CI on every PR.
-# Run locally before pushing changes to infra config files.
-#
-# Checks:
-#   1. docker-compose.yml syntax
-#   2. Prometheus config + alert rules
-#   3. Grafana dashboards (JSON) + provisioning (YAML)
-#   4. ShellCheck on all scripts
-#   5. environments/images.manifest.env — platform image keys derived from .env.example
-#   6. environments/*.config.env — config + secret keys derived from .env.example
-#   6b. environments/* — secret whitelist: no key from SECRET_KEYS may have a real value
-#   7. environments/production.manifest.env — RELEASE_VERSION present semver
-#
-# .env.example is the single source of truth for which variables must be defined.
+# Validate repository configuration and generated environments.
+# Runs on: GitHub Actions runner, or developer machine.
+# Called by: PR workflow or operator.
+# Calls: ops/generate_env.sh (with dummy CI secrets).
+# Usage: ./scripts/ci/check_repo.sh
 
 set -euo pipefail
 
+command -v jq >/dev/null || { echo "ERROR: jq is required for JSON validation" >&2; exit 1; }
+
+# ── Helpers: report validation results ───────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
@@ -28,27 +20,14 @@ fail() { echo -e "  ${RED}✘${NC} $1"; FAILURES=$((FAILURES + 1)); }
 info() { echo -e "  ${YELLOW}…${NC} $1"; }
 
 FAILURES=0
-INFRA_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+INFRA_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$INFRA_DIR"
 
 echo ""
 echo "=== validate_repo ==="
 echo ""
 
-# ── 1. docker-compose.yml ────────────────────────────────────
-echo "Docker Compose:"
-
-while IFS= read -r var; do
-  if [[ -z "${!var:-}" ]]; then
-    export "$var=8080"
-  fi
-done < <(grep -oP '\$\{(\w+)' docker-compose.yml | sed 's/\${//' | sort -u)
-
-if docker compose config --quiet 2>/dev/null; then
-  pass "docker-compose.yml is valid"
-else
-  fail "docker-compose.yml has errors"
-fi
+# Compose is checked below with each generated environment, not invented defaults.
 
 # ── 2. Prometheus ─────────────────────────────────────────────
 echo ""
@@ -86,7 +65,7 @@ if [[ -d "$DASHBOARD_DIR" ]]; then
     info "No dashboard JSON files found in $DASHBOARD_DIR"
   else
     for f in "${json_files[@]}"; do
-      if python3 -m json.tool "$f" > /dev/null 2>&1; then
+      if jq empty "$f" > /dev/null 2>&1; then
         pass "$(basename "$f") is valid JSON"
       else
         fail "$(basename "$f") is invalid JSON"
@@ -120,7 +99,7 @@ echo "ShellCheck:"
 if ! command -v shellcheck > /dev/null 2>&1; then
   fail "shellcheck is not installed (apt install shellcheck)"
 else
-  for f in scripts/*.sh; do
+  for f in scripts/{ci,ops,checks}/*.sh; do
     if shellcheck "$f" > /dev/null 2>&1; then
       pass "$(basename "$f") passes shellcheck"
     else
@@ -129,27 +108,27 @@ else
   done
 fi
 
-# ── Derive key sets from .env.example (single source of truth) ───────────────
-EXAMPLE_FILE=".env.example"
+# ── Derive key sets from .env.contract (single source of truth) ───────────────
+CONTRACT_FILE=".env.contract"
 
-if [[ ! -f "$EXAMPLE_FILE" ]]; then
-  echo "ERROR: $EXAMPLE_FILE not found — cannot derive expected keys."
+if [[ ! -f "$CONTRACT_FILE" ]]; then
+  echo "ERROR: $CONTRACT_FILE not found — cannot derive expected keys."
   exit 1
 fi
 
-# Keys whose value in .env.example is SECRET_IN_GITHUB_ENV
-mapfile -t SECRET_KEYS < <(grep -E '^[A-Z_]+=SECRET_IN_GITHUB_ENV$' "$EXAMPLE_FILE" | cut -d= -f1)
+# Keys whose value in .env.contract is SECRET_IN_GITHUB_ENV
+mapfile -t SECRET_KEYS < <(grep -E '^[A-Z_][A-Z0-9_]*=SECRET_IN_GITHUB_ENV$' "$CONTRACT_FILE" | cut -d= -f1)
 
 # Platform image keys: *_IMAGE entries that are NOT local-only (BACKEND_IMAGE, FRONTEND_IMAGE)
 LOCAL_ONLY_IMAGE_KEYS=(BACKEND_IMAGE FRONTEND_IMAGE)
 mapfile -t PLATFORM_IMAGE_KEYS < <(
-  grep -E '^[A-Z_]+_IMAGE=' "$EXAMPLE_FILE" | cut -d= -f1 | grep -vFf <(printf '%s\n' "${LOCAL_ONLY_IMAGE_KEYS[@]}")
+  grep -E '^[A-Z_][A-Z0-9_]*_IMAGE=' "$CONTRACT_FILE" | cut -d= -f1 | grep -vxFf <(printf '%s\n' "${LOCAL_ONLY_IMAGE_KEYS[@]}")
 )
 
 # Config keys: all non-comment keys that are not secrets, not images (platform or local-only)
 ALL_EXCLUDE_KEYS=("${SECRET_KEYS[@]}" "${LOCAL_ONLY_IMAGE_KEYS[@]}" "${PLATFORM_IMAGE_KEYS[@]}")
 mapfile -t CONFIG_KEYS < <(
-  grep -E '^[A-Z_]+=' "$EXAMPLE_FILE" | cut -d= -f1 | grep -vFf <(printf '%s\n' "${ALL_EXCLUDE_KEYS[@]}")
+  grep -E '^[A-Z_][A-Z0-9_]*=' "$CONTRACT_FILE" | cut -d= -f1 | grep -vxFf <(printf '%s\n' "${ALL_EXCLUDE_KEYS[@]}")
 )
 
 # ── 5. Shared images manifest ─────────────────────────────────
@@ -194,7 +173,9 @@ check_config_file() {
   done
 
   for key in "${SECRET_KEYS[@]}"; do
-    if grep -qE "^${key}=SECRET_IN_GITHUB_ENV$" "$file"; then
+    if [[ "$label" == "local.config.env" ]] && grep -qE "^${key}=.+" "$file"; then
+      : # Local-only development credentials are versioned defaults.
+    elif grep -qE "^${key}=SECRET_IN_GITHUB_ENV$" "$file"; then
       : # ok
     elif grep -qE "^${key}=" "$file"; then
       fail "$label: $key must be SECRET_IN_GITHUB_ENV (not a real value)"
@@ -210,6 +191,7 @@ check_config_file() {
   fi
 }
 
+check_config_file "environments/local.config.env"      "local.config.env"
 check_config_file "environments/staging.config.env"    "staging.config.env"
 check_config_file "environments/production.config.env" "production.config.env"
 
@@ -219,18 +201,46 @@ echo "Secret whitelist (environments/*):"
 
 leaked=0
 while IFS= read -r -d '' file; do
+  [[ "$file" == "environments/local.config.env" ]] && continue
   for key in "${SECRET_KEYS[@]}"; do
-    # Match KEY=<anything> where value is NOT SECRET_IN_GITHUB_ENV and NOT empty
-    if grep -qE "^${key}=.+" "$file" && ! grep -qE "^${key}=SECRET_IN_GITHUB_ENV$" "$file"; then
-      fail "$(basename "$file"): $key has a real value — must be SECRET_IN_GITHUB_ENV"
-      leaked=$((leaked + 1))
-    fi
+    while IFS='=' read -r _ value; do
+      if [[ "$value" != SECRET_IN_GITHUB_ENV ]]; then
+        fail "$(basename "$file"): $key must be SECRET_IN_GITHUB_ENV"
+        leaked=$((leaked + 1))
+      fi
+    done < <(grep -E "^${key}=" "$file" || true)
   done
 done < <(find environments/ -type f -name '*.env' -print0)
 
 if [[ "$leaked" -eq 0 ]]; then
-  pass "no secret keys with real values found in environments/"
+  pass "no real secret values found outside local development defaults"
 fi
+
+# ── Generate runtime files and validate Compose ──────────────────────
+# Generate and validate each environment with dummy CI secrets; no SSH or deploy.
+ENV_CHECK_DIR="$(mktemp -d)"
+trap 'rm -rf "$ENV_CHECK_DIR"' EXIT
+for key in "${SECRET_KEYS[@]}"; do
+  export "$key=ci-validation-only"
+done
+for environment in local staging production; do
+  if ./scripts/ops/generate_env.sh "$environment" --output "${ENV_CHECK_DIR}/.env.${environment}"; then
+    # Compose gives inherited shell variables precedence; check the file itself.
+    if (
+      runtime_file="${ENV_CHECK_DIR}/.env.${environment}"
+      while IFS='=' read -r key _; do
+        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && unset "$key"
+      done < "$runtime_file"
+      docker compose --env-file "$runtime_file" config --quiet
+    ); then
+      pass "$environment runtime file and Compose configuration are valid"
+    else
+      fail "$environment Compose configuration is invalid"
+    fi
+  else
+    fail "$environment runtime generation failed"
+  fi
+done
 
 # ── 7. Production manifest preflight ─────────────────────────
 # Full semver + tag-collision validation is done in deploy-production.yml.

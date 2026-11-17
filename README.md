@@ -1,163 +1,120 @@
 # Ductifact — Infrastructure
 
-Infrastructure configuration for the **production** and **staging** environments of Ductifact.
+Docker Compose configuration for local, staging, and production. The server
+checkout lives at `~/ductifact/infra`.
 
-This repo is cloned on the server (`~/ductifact/infra/`) and contains everything needed to orchestrate services with Docker Compose.
+Published service ports bind to `127.0.0.1`; Caddy and Cloudflare Tunnel provide
+external access. Prometheus/Grafana configuration lives in `observability/`.
 
-**This repo is the source of truth for production deployments** — merging changes to `environments/production.manifest.env` triggers a deploy.
+## Deployment flow
 
-## Project Structure
+### Staging — automatic
 
-```
-├── .github/workflows/
-│   ├── ci.yml                   # CI: validates compose + observability + scripts
-│   ├── propose-staging.yml      # Opens auto-merge PR for staging manifest updates
-│   ├── deploy-staging.yml       # Deploys staging when staging manifest changes on main
-│   ├── propose-production.yml   # Opens production promotion PR (manual approval)
-│   ├── deploy-production.yml    # Deploys production when production manifest changes on main
-│   └── _deploy.yml              # Shared deploy workflow (SSH + env sync + deploy script)
-├── docker-compose.yml           # Production/staging compose (single source of truth)
-├── environments/
-│   ├── production.manifest.env  # 🎯 Production manifest (image versions)
-│   ├── production.config.env    # Production runtime config + explicit secret placeholders
-│   ├── staging.manifest.env     # Staging manifest (image versions)
-│   ├── staging.config.env       # Staging runtime config + explicit secret placeholders
-│   └── images.manifest.env      # Shared infra/base images (postgres, redis, minio, ...)
-├── .env.example                 # Single environment variables template (reference only)
-├── observability/               # Prometheus + Grafana configuration
-│   ├── prometheus/
-│   │   ├── prometheus.yml
-│   │   └── alerts.yml
-│   └── grafana/
-│       ├── provisioning/
-│       └── dashboards/
-└── scripts/
-    ├── deploy.sh                # Deploy script (reads only .env.<env>)
-    ├── smoke.sh                 # Post-deploy health checks
-    └── validate.sh              # Pre-deploy validation
+```text
+Backend/frontend publishes an image
+  ↓
+propose-staging.yml opens a PR updating staging.manifest.env
+  ↓
+CI passes → PR auto-merges into main
+  ↓
+deploy-staging.yml
+  ↓
+Generate .env.staging from environments/* + GitHub staging secrets
+  ↓
+Upload to server → update checkout → deploy.sh staging
+  ↓
+Validate configuration → pull images → start services → health checks
 ```
 
-## Deployment Flow
+Staging also deploys when its config, shared platform images, or Compose file
+changes on `main`.
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│ STAGING (automatic via PR + auto-merge)                           │
-│                                                                   │
-│ backend/frontend image publish                                     │
-│   → propose-staging.yml opens PR updating staging.manifest.env    │
-│   → CI ✅ + auto-merge                                             │
-│   → deploy-staging.yml                                             │
-│   → _deploy.yml builds .env.staging from environments/* + secrets │
-│   → SSH to server → deploy.sh staging                             │
-└──────────────────────────────────────────────────────────────────┘
+### Production — reviewed promotion
 
-┌──────────────────────────────────────────────────────────────────┐
-│ PRODUCTION (semi-automatic via GitOps)                            │
-│                                                                   │
-│ 1. Human validates in staging                                     │
-│ 2. Trigger propose-production.yml (manual)                        │
-│ 3. Workflow opens PR bumping RELEASE_VERSION + production images   │
-│ 4. Human reviews + approves + merges                              │
-│ 5. deploy-production.yml triggers                                 │
-│ 6. _deploy.yml builds .env.production from environments/* + secrets│
-│ 7. SSH to server → deploy.sh production                           │
-└──────────────────────────────────────────────────────────────────┘
+```text
+Validate the application in staging
+  ↓
+Run propose-production.yml manually (patch/minor/major)
+  ↓
+PR copies staging images to production.manifest.env + bumps RELEASE_VERSION
+  ↓
+Review and merge into main
+  ↓
+deploy-production.yml
+  ↓
+Generate .env.production from environments/* + GitHub production secrets
+  ↓
+Upload to server → update checkout → deploy.sh production
+  ↓
+Validate configuration → pull images → start services → health checks
+  ↓
+Create the version tag and GitHub Release
 ```
 
-### Promoting to Production
+Production deploys when `environments/production.manifest.env` changes on `main`.
+Use immutable `sha-*` app images and pinned digests for shared platform images.
+`RELEASE_VERSION` identifies the deployed release in the backend's `/readyz` response.
 
-**Manual:** Edit `environments/production.manifest.env` directly and open a PR:
+## Configuration
+
+| File | Purpose |
+|------|---------|
+| `docker-compose.yml` | Services, networks, volumes, and healthchecks |
+| `environments/<env>.config.env` | Versioned settings; CI secret placeholders for staging/production |
+| `environments/<env>.manifest.env` | Application image versions; production also defines `RELEASE_VERSION` |
+| `environments/images.manifest.env` | Shared platform image versions |
+| `.env.contract` | Required variables and secret markers used by validation |
+| `.env.local`, `.env.staging`, `.env.production` | Final runtime files consumed by deployment; never committed |
+
+The generator combines the environment config, app manifest, and shared images.
+CI injects current GitHub Environment secrets and replaces the server's runtime
+file on each deployment. Persistent remote changes belong in the versioned
+inputs or GitHub secrets. Changing a secret alone does not trigger a deployment.
+
+Keep runtime files on the server: maintenance commands also need them. Generated
+files have permissions `600`.
+
+## Local setup
+
+Requires Bash 4.4+, Docker Compose v2 with `config --environment` and
+`up --wait --wait-timeout`, and `jq`.
+
+From `infra/`, with `backend/` and `frontend/` checked out beside it:
 
 ```bash
-# Update backend to a tested immutable image
-sed -i 's|^BACKEND_IMAGE=.*|BACKEND_IMAGE=ghcr.io/hyka-tech-ductifact/backend:sha-abc1234|' environments/production.manifest.env
-
-# Update both services at once
-git checkout -b promote/release-2026-05-20
-git add environments/production.manifest.env
-git commit -m "promote: backend sha-abc1234 + frontend sha-def5678"
-git push origin promote/release-2026-05-20
-# → Open PR → Review → Merge → Auto-deploy
+docker build -t backend-app ../backend
+docker build -t frontend-app ../frontend
+./scripts/ops/generate_env.sh local
+./scripts/ops/deploy.sh local
 ```
 
-### Production Versioning (Tags & Releases)
+Local config contains development-only credentials. Edit `.env.local` for personal
+settings. Generation refuses to overwrite an existing file; `--force` replaces
+it completely, including credentials. Keep credentials consistent with existing
+service volumes.
 
-- Every successful production deploy creates a git tag + GitHub Release in this repo.
-- `propose-production.yml` bumps patch version in `environments/production.manifest.env`.
-- Merging that PR triggers `deploy-production.yml` and release creation.
-- Release notes include deployed backend/frontend image refs from `environments/production.manifest.env`.
-- `environments/production.manifest.env` also includes `RELEASE_VERSION` (manually maintained) and is injected into backend runtime for `/readyz`.
+SMTP runs outside this stack. Set a reachable endpoint in `.env.local`; the default
+`host.docker.internal:1025` needs a host mapping on Linux.
 
-### Rollback
+## Server and GitHub setup
 
-```bash
-# Revert the last promotion commit
-git revert HEAD
-git push origin main
-# → cd-production.yml triggers → deploys the previous versions
-```
+Clone this repo at `~/ductifact/infra` on the server. Install the deployment
+requirements above and configure access to the application image registry.
+Create separate GitHub Environments named `staging` and `production` with:
 
-## Setup
+| Purpose | Secrets |
+|---------|---------|
+| SSH | `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY` |
+| Cloudflare Access | `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` |
+| Application | `DB_PASSWORD`, `JWT_SECRET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `REDIS_PASSWORD` |
+| Email | `SMTP_USERNAME`, `SMTP_PASSWORD` |
 
-```bash
-# 1. Clone on the server
-git clone https://github.com/hyka-tech-ductifact/infra.git ~/ductifact/infra
-cd ~/ductifact/infra
+The promotion workflows also use `INFRA_PAT`; image-publishing repos use it to
+notify this repo. Deployment workflows call `scripts/ci/deploy_remote.sh` to
+generate configuration, upload it, and deploy over SSH.
 
-# 2. Optional local bootstrap: use the single template as reference
-cp .env.example .env.local
-# Set local images in .env.local (required for local deploy)
-# BACKEND_IMAGE=backend-app
-# FRONTEND_IMAGE=frontend-app
-# CI-driven deploys build .env.staging/.env.production from environments/* + GitHub Environment secrets
-# deploy.sh never generates .env files; it only consumes .env.local/.env.staging/.env.production
+## Guides
 
-# 3. Log in to ghcr.io
-echo "YOUR_GITHUB_TOKEN" | docker login ghcr.io -u YOUR_USER --password-stdin
-
-# 4. Start the environments
-./scripts/deploy.sh staging
-./scripts/deploy.sh production
-```
-
-## Required Secrets (GitHub)
-
-| Secret | Used by | Purpose |
-|--------|---------|---------|
-| `VPS_SSH_KEY` | deploy-staging/deploy-production | SSH key for server access |
-| `VPS_USER` | deploy-staging/deploy-production | Server username |
-| `VPS_HOST` | deploy-staging/deploy-production | Server hostname (Cloudflare Tunnel) |
-| `CF_ACCESS_CLIENT_ID` | deploy-staging/deploy-production | Cloudflare Access service token ID |
-| `CF_ACCESS_CLIENT_SECRET` | deploy-staging/deploy-production | Cloudflare Access service token secret |
-| `DB_PASSWORD` | deploy-staging/deploy-production | Database password |
-| `JWT_SECRET` | deploy-staging/deploy-production | JWT signing secret |
-| `MINIO_ROOT_USER` | deploy-staging/deploy-production | MinIO root username |
-| `MINIO_ROOT_PASSWORD` | deploy-staging/deploy-production | MinIO root password |
-| `SMTP_USERNAME` | deploy-staging/deploy-production | SMTP username |
-| `SMTP_PASSWORD` | deploy-staging/deploy-production | SMTP password / API key |
-| `REDIS_PASSWORD` | deploy-staging/deploy-production | Redis password |
-| `INFRA_PAT` | backend/frontend repos | PAT with `repo` scope to dispatch events to this repo |
-
-## Notes
-
-- `.env.production`, `.env.staging`, and `.env.local` are **runtime files only** and are **never committed**.
-- `.env.example` is the single reference template for all variables.
-- `deploy.sh` reads only `.env.<env>` and treats it as the only runtime source of truth.
-- `environments/*.config.env` and `environments/*manifest.env` are **auxiliary build inputs** used to construct final `.env` files.
-- Sensitive values are never committed; placeholders in config (`SECRET_IN_GITHUB_ENV`) are replaced in CI.
-- Staging and production use **different credentials** (DB, JWT).
-- Ports are only exposed on `127.0.0.1` — Caddy (host-level) handles reverse proxying.
-- Full CD guide available at `backend/docs/GUIDE_CD.md`.
-- Server maintenance (logs, backups, rollbacks, security) documented in [`MAINTENANCE.md`](MAINTENANCE.md).
-
-## Image Versioning Policy
-
-- `docker-compose.yml` is the runtime source of truth for infrastructure services (`postgres`, `redis`, `minio`, `prometheus`, `grafana`).
-- External images should be pinned with immutable references (`tag@sha256:digest` or `@sha256:digest`) to avoid drift.
-- `environments/{staging,production}.manifest.env` controls app promotions (`BACKEND_IMAGE`, `FRONTEND_IMAGE`) and should use immutable `sha-*` tags.
-- Local uses `.env.local` for `BACKEND_IMAGE` and `FRONTEND_IMAGE`.
-- Update flow: bump in staging first, validate smoke checks, then promote to production via PR.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for branch naming, workflow, deploy process, and PR guidelines.
+- [Scripts](scripts/README.md): commands, execution locations, and automatic calls.
+- [Maintenance](MAINTENANCE.md): logs, backups, rollback, and storage migration.
+- [Contributing](CONTRIBUTING.md): PR workflow and validation.
