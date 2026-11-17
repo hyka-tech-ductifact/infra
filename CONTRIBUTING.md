@@ -1,79 +1,28 @@
-# Contributing Guide
+# Contributing
 
-## Workflow overview
+Create a branch from `main` and open a PR back into `main`. Use `feat/`, `fix/`,
+or `chore/` branch names and matching conventional commit prefixes. Squash-merge
+after CI passes.
+Do not push directly to `main`; keep PRs focused on one change.
 
-This repo **has no versions and no CD pipeline**. Each change is deployed manually after merge — staging first, then production.
-
-This is intentional: infra changes (image upgrades, config tweaks) are infrequent and high-impact, so a human should always be in control.
-
----
-
-## 1) Branches
-
-| Prefix | Purpose | Example |
-|--------|---------|---------|
-| `feat/` | New services, dashboards, alerts | `feat/add-redis` |
-| `fix/` | Fix broken config, wrong ports | `fix/prometheus-scrape-interval` |
-| `chore/` | Version bumps, CI, docs, cleanup | `chore/upgrade-grafana-12` |
-
-All PRs target `main`. There are no releases, tags, or versions — `main` is always the source of truth and production is updated manually.
-
----
-
-## 2) Day-to-day workflow
+## Before opening a PR
 
 ```bash
-git checkout main && git pull
-git checkout -b chore/upgrade-prometheus
-
-# edit, commit, push
-git push -u origin chore/upgrade-prometheus
+./scripts/ci/check_repo.sh
 ```
 
-Open a PR into `main`. Use **squash merge** (1 PR = 1 commit).
+Checks cover Compose, Prometheus, Grafana, shell scripts, and generated environment
+files using dummy CI secrets. Requires Docker, `jq`, ShellCheck, and Python;
+install PyYAML to include YAML provisioning checks.
 
-CI validates compose syntax, Prometheus config, Grafana dashboards, and deploy script.
+Make shared config/image changes in `environments/`; personal local changes go
+in the ignored `.env.local`. Never commit real staging/production credentials.
 
----
+## Deploying changes
 
-## 3) Deploy (after merge)
+Validate changes in staging before promoting to production. Follow the
+[deployment flow](README.md#deployment-flow); production promotions use a reviewed
+PR with a new `RELEASE_VERSION`.
 
-```bash
-# SSH to the server
-ssh deploy@your-server
-
-cd ~/ductifact/infra
-
-# Always staging first
-./scripts/deploy.sh staging
-# Verify: check logs, health endpoints, Grafana
-
-# Then production
-./scripts/deploy.sh production
-# Verify again
-```
-
-The script reads `BACKEND_IMAGE` and `FRONTEND_IMAGE` from `.env.<environment>`, pulls both images, restarts containers, and verifies they are running.
-
-For **local testing** (no git pull, no docker pull):
-
-```bash
-./scripts/deploy.sh local
-```
-
----
-
-## 4) Commit messages
-
-[Conventional Commits](https://www.conventionalcommits.org/):
-
-`feat:`, `fix:`, `chore:`
-
----
-
-## 5) PR rules
-
-- No direct pushes to `main`
-- CI must pass (compose validation, prometheus config, shellcheck)
-- Keep PRs small and focused
-- Test in staging before applying to production
+See [local setup](README.md#local-setup) to run the stack and the
+[script guide](scripts/README.md) for individual commands.

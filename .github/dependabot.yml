@@ -13,7 +13,7 @@ multi-ecosystem-groups:
       - "dependencies"
 
 updates:
-  # Docker images (postgres, redis, minio, prometheus, grafana)
+  # Docker images (postgres, redis, RustFS (S3), prometheus, grafana)
   - package-ecosystem: "docker"
     directory: "/"
     patterns: ["*"]
