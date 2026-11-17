@@ -28,7 +28,10 @@ ops/deploy.sh → checks/env.sh → deploy → checks/health.sh
 ```
 
 `deploy.sh` includes validation and health checks, waits up to 120 seconds for
-startup, and prints diagnostics on failure. Its `stop` action only stops services.
+startup, and prints diagnostics on failure. Each deployment also recreates
+Prometheus to load the current mounted configuration and alert rules, preserving
+its data volume. Health checks allow a 60-second retry window for backend scraping
+and report the target URL and last error on failure. Its `stop` action only stops services.
 CI updates the server checkout; before a manual server update, run
 `git pull --ff-only origin main` yourself. Deployment uses the installed runtime
 file and does not regenerate it.

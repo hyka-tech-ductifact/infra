@@ -173,9 +173,10 @@ else
 fi
 
 # ── 7. Prometheus scraping the backend ──────────────────────
-# Prometheus may need a few seconds to complete the first scrape after startup.
+# Allow several 15-second scrape intervals after the backend/Prometheus restart.
 SCRAPE_OK=false
-for _ in 1 2 3 4 5; do
+SCRAPE_DEADLINE=$((SECONDS + 60))
+while true; do
   TARGETS_JSON=$(docker exec "$PROM_CONTAINER" wget -qO- --timeout=5 http://localhost:9090/api/v1/targets 2>/dev/null || echo "")
   if jq -e '.status == "success" and
       ([.data.activeTargets[]? | select(.labels.job == "ductifact-api")] |
@@ -183,14 +184,23 @@ for _ in 1 2 3 4 5; do
     SCRAPE_OK=true
     break
   fi
+  if ((SECONDS >= SCRAPE_DEADLINE)); then break; fi
   sleep 3
 done
 
 if [[ "$SCRAPE_OK" == true ]]; then
   pass "Scraping ductifact-api target (health=up)"
 else
-  info "Prometheus reachable but ductifact-api target is not up yet (waited 15s)"
   fail "ductifact-api target not healthy"
+  if jq -e '.status == "success" and (.data.activeTargets | type == "array")' <<< "$TARGETS_JSON" >/dev/null 2>&1; then
+    jq -r '
+      [.data.activeTargets[] | select(.labels.job == "ductifact-api")] |
+      if length == 0 then "    No ductifact-api target found in the loaded Prometheus configuration."
+      else .[] | "    URL: \(.scrapeUrl)\n    Health: \(.health)\n    Last error: \(.lastError)\n    Last scrape: \(.lastScrape)"
+      end' <<< "$TARGETS_JSON"
+  else
+    info "Could not read a valid target list from the Prometheus API"
+  fi
 fi
 
 # ── 8. Grafana health ──────────────────────────────────────

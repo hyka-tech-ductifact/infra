@@ -98,6 +98,16 @@ if ! "${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 120; then
   exit 1
 fi
 
+# Compose does not detect changes to the contents of bind-mounted config files.
+# Recreate Prometheus so it remounts and loads the current config and alert rules.
+# Its named data volume is preserved.
+echo "Reloading Prometheus configuration..."
+if ! "${COMPOSE[@]}" up -d --no-deps --force-recreate --wait --wait-timeout 120 prometheus; then
+  echo "ERROR: $ENV deployment failed: could not recreate Prometheus." >&2
+  show_diagnostics
+  exit 1
+fi
+
 # ── Post-deploy smoke tests ──────────────────────────────────
 echo "Running post-deploy smoke tests..."
 if "${SCRIPT_DIR}/../checks/health.sh" "$ENV"; then
